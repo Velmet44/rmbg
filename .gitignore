@@ -30,5 +30,6 @@ benchmarks/harness/fixtures/*.jpg
 benchmarks/harness/fixtures/*.jpeg
 benchmarks/harness/fixtures/*.png
 !benchmarks/harness/fixtures/README.md
-benchmarks/harness/results/*.json
+# Harness outputs: measurements, masks, logs stay local (READMEs tracked)
+benchmarks/harness/results/*
 !benchmarks/harness/results/README.md
