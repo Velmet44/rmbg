@@ -173,6 +173,7 @@ function drawMaskGray(target: HTMLCanvasElement, mask: AlphaMask) {
 
 function refreshDisplay() {
   if (!state.image || !state.mask || !resultCanvas) return;
+  syncUndoRedo();
   const demo = $('#demoSubject') as HTMLElement;
   demo.style.display = 'none';
   const up = $('#uploadedImg') as HTMLImageElement;
@@ -338,7 +339,7 @@ async function realExport() {
     setTimeout(() => URL.revokeObjectURL(a.href), 5000);
     $('#expNote').textContent = `Done: ${a.download} · ${(blob.size / 1048576).toFixed(2)} MB · ${note}`;
     W.toast('Export complete');
-    state.log.commitRegion(state.mask, 'export', () => ({ x: 0, y: 0, w: 0, h: 0 }));
+    syncUndoRedo();
   } catch (e) {
     $('#expNote').textContent = `Export failed: ${String(e).slice(0, 140)} — retry or try PNG.`;
     W.toast('Export failed', true);
@@ -356,6 +357,26 @@ W.setCompare = realCompare;
 W.runExport = realExport;
 
 $('#btnRecompute').addEventListener('click', () => { void rerunCurrentTier(); });
+function syncUndoRedo() {
+  ( $('#btnUndo') as HTMLButtonElement).disabled = !state.log.canUndo || !state.mask;
+  ( $('#btnRedo') as HTMLButtonElement).disabled = !state.log.canRedo || !state.mask;
+}
+
+// Real undo/redo over the operation log (the mockup shell binds mock
+// handlers directly, so rebind). Covers AI removal, recompute, tier
+// switches — brush-level ops arrive with Stage 3.
+($('#btnUndo') as HTMLButtonElement).onclick = () => {
+  if (!state.mask) return;
+  const label = state.log.undo(state.mask);
+  if (label) { refreshDisplay(); W.toast(`Undone: ${label}`); }
+  syncUndoRedo();
+};
+($('#btnRedo') as HTMLButtonElement).onclick = () => {
+  if (!state.mask) return;
+  const label = state.log.redo(state.mask);
+  if (label) { refreshDisplay(); W.toast(`Redone: ${label}`); }
+  syncUndoRedo();
+};
 // The mockup shell binds the mock export directly; rebind to the real one.
 ($('#btnDoExport') as HTMLButtonElement).onclick = () => { void realExport(); };
 $$('[data-ai]').forEach((r) => {
