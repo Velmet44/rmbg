@@ -36,16 +36,19 @@ WebGPU→WASM fallback, `--inferSize` bisection support.
 
 ## PENDING (need adequate hardware: real GPU or stronger CPU)
 
-- In-browser cold/warm inference numbers for both tiers.
-- Quality-tier (BiRefNet-general) measurement of any kind.
+- In-browser cold/warm inference numbers for the quality tier.
 - Torture-set expansion (1 real fixture + synthetic now; hair/fur/glasses
   cases still to add) and human ratings of real-fixture masks.
 - Full apple-to-apple quality comparison vs server tools.
 
-## Consequences recorded (SPEC §6)
+## Decided from measurement (not pending)
 
-- Fast-tier download is ~109 MB (fp16/WebGPU) / ~224 MB (fp32/WASM CPU),
-  not single-digit MB. First-run honesty (determinate MB progress) is
-  mandatory; a truly tiny fast model + self-hosted weights are Stage-2 work.
+- Quality tier (BiRefNet-512 fp16) is GPU-only: node ORT dies with
+  `bad allocation` in the deformable-attention block even at 512px on an
+  8 GB CPU box. CPU users stay on the fast tier by design; the app's
+  upgrade path targets WebGPU only.
+- Fast-tier download is ~98 MB (fp16/WebGPU) / ~183 MB (fp32/WASM CPU).
+  First-run honesty (determinate MB progress) is mandatory; a truly tiny
+  fast model + self-hosted weights are Stage-2 work.
 - CPU inference is minutes-per-pass class on weak hardware: inference must
   move to a Web Worker (Stage 2) so the page never looks dead while working.

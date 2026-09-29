@@ -34,12 +34,23 @@ export class TransformersAdapter implements SegmentationAdapter {
 
   constructor(
     readonly modelId: string,
-    private opts: { device?: TransformersDevice; dtype?: string; runtimeUrl?: string } = {},
+    private opts: {
+      device?: TransformersDevice;
+      dtype?: string;
+      runtimeUrl?: string;
+      /** Injected runtime loader (tests). Defaults to the pinned CDN ESM. */
+      loadRuntime?: (url: string) => Promise<any>;
+    } = {},
   ) {}
 
   get backend(): string | null { return this.deviceUsed; }
 
   get runtimeUrl(): string { return this.opts.runtimeUrl ?? DEFAULT_RUNTIME_URL; }
+
+  private runtime(): Promise<any> {
+    const load = this.opts.loadRuntime ?? loadRuntime;
+    return load(this.runtimeUrl);
+  }
 
   async init(progress?: (p: ModelProgress) => void): Promise<void> {
     if (this.seg) return;
@@ -54,7 +65,7 @@ export class TransformersAdapter implements SegmentationAdapter {
   }
 
   private async doInit(progress?: (p: ModelProgress) => void): Promise<void> {
-    const { pipeline, RawImage } = await loadRuntime(this.runtimeUrl);
+    const { pipeline, RawImage } = await this.runtime();
     this.RawImageCtor = RawImage;
     const want = this.opts.device ?? 'auto';
     // Never benchmark-or-hang on a software rasterizer: SwiftShader/llvmpipe
@@ -113,7 +124,7 @@ export class TransformersAdapter implements SegmentationAdapter {
       // headless/weak GPUs even when session creation succeeds.
       // Fall through to WASM fp32 and retry once.
       await this.dispose();
-      const { pipeline, RawImage } = await loadRuntime(this.runtimeUrl);
+      const { pipeline, RawImage } = await this.runtime();
       this.RawImageCtor = RawImage;
       this.seg = await pipeline('image-segmentation', this.modelId, {
         device: 'wasm' as any,

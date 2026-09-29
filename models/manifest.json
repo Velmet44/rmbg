@@ -18,7 +18,8 @@
       "files": ["onnx/model.onnx", "onnx/model_fp16.onnx", "config.json", "preprocessor_config.json"],
       "bytes": 98484532,
       "bytesNote": "onnx/model_fp16.onnx measured 2026-09-29 via CDN headers; onnx/model.onnx (fp32, WASM CPU path) is 191877254 bytes",
-      "checksum": null,
+      "checksum": "sha256:EFF9216BB2F9D3F023D9C2B7196845A7485739AB1F231593633E4D2344FFC516",
+      "checksumNote": "computed 2026-09-29 over the CDN-fetched onnx/model_fp16.onnx",
       "inputSize": 1024,
       "backends": ["webgpu", "wasm"]
     },
@@ -37,7 +38,9 @@
       "modifications": "none by RMBG (upstream fp16 ONNX; fp16-only, no fp32 file)",
       "files": ["onnx/model_fp16.onnx", "config.json", "preprocessor_config.json"],
       "bytes": 473435223,
-      "bytesNote": "onnx/model_fp16.onnx per CDN headers 2026-09-29; fp16-only so this tier requires WebGPU (no WASM CPU fallback); gate measurement pending adequate hardware",
+      "bytesNote": "onnx/model_fp16.onnx measured 2026-09-29 (473 MB in 45 s); fp16-only so this tier requires WebGPU (no WASM CPU fallback)",
+      "checksum": "sha256:6EA208A51DE23AAB41F42489E5764D1C9D70896FBEF5F0A0666404DCD3C3B3D8",
+      "checksumNote": "computed 2026-09-29 over the CDN-fetched onnx/model_fp16.onnx",
       "inputSize": 1024,
       "backends": ["webgpu", "wasm"]
     },

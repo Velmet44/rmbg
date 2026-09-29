@@ -121,11 +121,17 @@ function ensureCanvases(img: ImageRef) {
     splitR.appendChild(splitCanvas);
   }
   const splitImg = $('#splitOrig') as HTMLImageElement | null;
+  const splitL = $('#splitL') as HTMLElement;
   if (!splitImg && state.previewURL) {
+    // Real photo replaces the mock gradient: exact cover, same aspect as the
+    // checker (fitChecker sizes the stage to the image).
+    splitL.style.background = 'none';
+    const svg = splitL.querySelector('svg');
+    if (svg) (svg as unknown as HTMLElement).style.display = 'none';
     const el = document.createElement('img');
     el.id = 'splitOrig';
-    el.style.cssText = 'width:300px;height:220px;object-fit:cover;position:absolute;inset:0;margin:auto';
-    ($('#splitL') as HTMLElement).appendChild(el);
+    el.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;object-fit:cover';
+    splitL.appendChild(el);
     el.src = state.previewURL;
   } else if (splitImg && state.previewURL) {
     splitImg.src = state.previewURL;
@@ -135,9 +141,9 @@ function ensureCanvases(img: ImageRef) {
 function drawComposite(target: HTMLCanvasElement, mask: AlphaMask, bg: Background, maxSide = 0) {
   const img = state.image!;
   const out = composite(img, mask, bg, FX_OFF);
-  const src = document.createElement('canvas');
-  src.width = out.width; src.height = out.height;
-  src.getContext('2d')!.putImageData(
+  // Reused scratch canvas: avoids a full-res allocation per redraw.
+  blit.width = out.width; blit.height = out.height;
+  blit.getContext('2d')!.putImageData(
     new ImageData(out.rgba as unknown as Uint8ClampedArray<ArrayBuffer>, out.width, out.height), 0, 0,
   );
   let dw = out.width, dh = out.height;
@@ -148,8 +154,10 @@ function drawComposite(target: HTMLCanvasElement, mask: AlphaMask, bg: Backgroun
   target.width = dw; target.height = dh;
   const ctx = target.getContext('2d')!;
   ctx.clearRect(0, 0, dw, dh);
-  ctx.drawImage(src, 0, 0, dw, dh);
+  ctx.drawImage(blit, 0, 0, dw, dh);
 }
+
+const blit = document.createElement('canvas');
 
 function drawMaskGray(target: HTMLCanvasElement, mask: AlphaMask) {
   const ctx = target.getContext('2d')!;
@@ -256,6 +264,9 @@ async function upgradeToQuality() {
     lastCompare = lastCompare === 'before' ? 'before' : 'after';
     refreshDisplay();
     ($('#hqBanner') as HTMLElement).classList.add('on');
+    // One live inference session per page: free the fast tier's GPU memory.
+    // Switching back re-inits from cache (files stay, session rebuild ~15 s).
+    void adapters.fast.dispose().catch(() => {});
   } catch (e) {
     W.toast('HQ model unavailable — staying on fast tier', true);
   }
@@ -357,6 +368,9 @@ $$('[data-ai]').forEach((r) => {
     try {
       await ensureAdapter(want);
       state.tier = want;
+      // Keep a single live session: dispose the tier we leave.
+      const other = want === 'quality' ? adapters.fast : adapters.quality;
+      void other.dispose().catch(() => {});
       const mask = await engines[want].removeBackground(state.image, { tier: want });
       state.mask = mask;
       state.log.commitRegion(mask, 'tier-switch', () => null);

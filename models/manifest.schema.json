@@ -27,6 +27,7 @@
           "bytes": { "type": ["number", "null"] },
           "bytesNote": { "type": "string" },
           "checksum": { "type": ["string", "null"] },
+          "checksumNote": { "type": "string" },
           "inputSize": { "type": "number" },
           "backends": { "type": "array", "items": { "type": "string" } },
           "note": { "type": "string" }

@@ -9,6 +9,10 @@
 - `benchmarks/harness` — Stage 0 rig. Measure: `npm run measure --workspace @rmbg/harness -- --model=<id> --device=webgpu|wasm` (needs Playwright CLI session `rmbg`).
 - `models/manifest.json` — model provenance (schema + `LICENSE-AUDIT.md` beside it). Never commit weights, fixtures, or results (see `.gitignore`).
 - No UI framework. Engine must stay DOM-free; app owns canvas/DOM.
+- Inference runtime loads from pinned CDN ESM at runtime (never bundle it —
+  bundling produced silently broken sessions). One live inference session per
+  page: dispose the idle tier on switch (adapter has single-flight init +
+  dispose-reinit contract, covered by `adapter.test.ts`).
 
 ## Working agreement
 - Prefer executable sources of truth (`package.json` scripts, `Makefile`, CI workflows) over prose once they exist.
