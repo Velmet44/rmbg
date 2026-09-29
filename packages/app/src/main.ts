@@ -78,22 +78,36 @@ function callWorker(
 
 // ---------- helpers ----------
 
-function setBar(frac: number, mbText: string) {
+function setBar(frac: number, mbText: string, totalText?: string) {
   ($('#prepBar') as HTMLElement).style.width = `${Math.min(100, Math.max(0, frac * 100))}%`;
   $('#prepMB').textContent = mbText;
   $('#prepPct').textContent = `${Math.round(frac * 100)}%`;
+  if (totalText !== undefined) {
+    const t = $('#prepTotal') as HTMLElement | null;
+    if (t) t.textContent = totalText;
+  }
 }
 
 function fmtMB(n: number): string {
   return n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.round(n / 1024)} KB`;
 }
 
+/** True cache check: look for our model files in the Cache API instead of
+ *  guessing from event timing. */
+async function isModelCached(): Promise<boolean> {
+  try {
+    const cache = await caches.open('transformers-cache');
+    const keys = await cache.keys();
+    return keys.some((r) => r.url.includes('birefnet-lite-512'));
+  } catch {
+    return false; // Cache API unavailable (private mode etc.) → assume miss
+  }
+}
+
 /** Phased, honest progress for worker init.
  *  - initiate with no later download = served from cache.
  *  - download + progress = bytes flowing (determinate MB bar).
- *  - all done = session build ("Loading into memory…").
- *  Cached runs emit no byte events at all, so a watchdog flips the label
- *  instead of hanging on "starting…". */
+ *  - all done = session build ("Loading into memory…"). */
 function makeInitProgress() {
   const pendingFiles = new Set<string>();
   const bytes = new Map<string, { loaded: number; total: number }>();
@@ -102,14 +116,8 @@ function makeInitProgress() {
   const draw = () => {
     let l = 0, t = 0;
     for (const f of bytes.values()) { l += f.loaded; t += f.total; }
-    if (t > 0) setBar(l / t, `${fmtMB(l)} / ${fmtMB(t)} · cached after first visit`);
+    if (t > 0) setBar(l / t, `${fmtMB(l)}`, `${fmtMB(t)} · cached after first visit`);
   };
-  const timer = setTimeout(() => {
-    if (!finished && !sawDownload) {
-      $('#prepTitle').textContent = 'Model cached — loading…';
-      setBar(0, 'found in this browser, no download needed');
-    }
-  }, 1500);
   return {
     onEvent(p: ModelProgress) {
       if (finished) return;
@@ -127,7 +135,7 @@ function makeInitProgress() {
         }
       }
     },
-    finish() { finished = true; clearTimeout(timer); },
+    finish() { finished = true; },
   };
 }
 
@@ -297,6 +305,14 @@ async function realStart(_withDemo: boolean) {
   $('#prepTitle').textContent = 'Preparing local AI…';
   setBar(0, 'Checking cache…');
   try {
+    // Real cache verdict (Cache API), never a timing guess: the label must
+    // not claim "cached" unless the files are actually there.
+    if (await isModelCached()) {
+      $('#prepTitle').textContent = 'Model cached — loading…';
+      setBar(0, 'found in this browser, no download needed');
+    } else {
+      setBar(0, 'Downloading model… (one-time, ~98 MB)');
+    }
     await ensureReady();
     $('#prepTitle').textContent = 'Removing background…';
     setBar(1, `running on-device (${state.backend}) — the page stays usable`);
@@ -309,9 +325,11 @@ async function realStart(_withDemo: boolean) {
     W.toast(`Background removed in ${((performance.now() - t0) / 1000).toFixed(1)}s · ${state.backend}`);
     setTimeout(() => $('#fb').classList.add('on'), 2500);
   } catch (e) {
+    const msg = String((e as Error)?.message ?? e);
     $('#prepTitle').textContent = 'Could not start the local model';
-    setBar(0, 'failed — check connection once for the one-time download, then retry');
-    W.toast(`Model start failed: ${String(e).slice(0, 160)}`, true);
+    // Full error on screen (not just the toast): failures must be diagnosable.
+    setBar(0, `failed: ${msg.slice(0, 300)}`);
+    W.toast(`Model start failed: ${msg.slice(0, 160)}`, true);
   }
 }
 
@@ -415,9 +433,13 @@ function syncUndoRedo() {
 
 // Prefetch the model on page load so the first drop starts warm.
 // One-time download into the browser cache; silent unless it fails.
-callWorker({ type: 'init' }).then(
-  (res) => { state.backend = res.backend ?? 'cached'; },
-  () => { /* first real use will surface the error with UI */ },
-);
+// ?noprefetch=1 skips it (metered connections; also the deterministic way
+// to exercise the cold-download path when testing).
+if (!new URLSearchParams(location.search).has('noprefetch')) {
+  callWorker({ type: 'init' }).then(
+    (res) => { state.backend = res.backend ?? 'cached'; },
+    () => { /* first real use will surface the error with UI */ },
+  );
+}
 
 export {};
