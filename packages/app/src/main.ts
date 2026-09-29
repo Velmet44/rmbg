@@ -324,6 +324,9 @@ async function realStart(_withDemo: boolean) {
     W.runScan('Detecting subject…');
     W.toast(`Background removed in ${((performance.now() - t0) / 1000).toFixed(1)}s · ${state.backend}`);
     setTimeout(() => $('#fb').classList.add('on'), 2500);
+    // The bubble overlaps the canvas: dismiss it automatically, it stays
+    // one tap away via Refine if the user disagrees later.
+    setTimeout(() => $('#fb').classList.remove('on'), 14000);
   } catch (e) {
     const msg = String((e as Error)?.message ?? e);
     $('#prepTitle').textContent = 'Could not start the local model';

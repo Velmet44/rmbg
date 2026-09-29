@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>RMBG — UI Mockup (no features wired)</title>
+<title>RMBG — Remove backgrounds on your device</title>
 <link rel="icon" href="data:," />
 <style>
   :root{
@@ -327,7 +327,13 @@
     .ctx{position:fixed;left:0;right:0;bottom:56px;top:auto;width:auto;max-height:44vh;
       border-left:0;border-top:1px solid var(--border);border-radius:16px 16px 0 0;
       box-shadow:0 -14px 40px rgba(0,0,0,.55)}
-    #fb{right:12px;left:12px;width:auto;bottom:auto;top:60px}
+    #fb{right:8px;left:8px;width:auto;bottom:auto;top:58px;padding:10px 12px}
+    #fb p{margin-bottom:8px}
+    .statusbar{overflow-x:auto;scrollbar-width:none;gap:6px}
+    .statusbar::-webkit-scrollbar{display:none}
+    .statusbar .seg,.statusbar .iconbtn{flex:0 0 auto}
+    #localBtn{white-space:nowrap;flex:0 0 auto}
+    #zoomLbl{min-width:40px}
     #mobileNav{display:flex;flex:0 0 56px;background:var(--bg2);border-top:1px solid var(--border);
       z-index:35}
     #mobileNav button{flex:1;background:none;border:0;color:var(--muted);font-size:10px;font-weight:700;
@@ -365,7 +371,6 @@
     <span class="pill"><span class="dot"></span>Processing locally</span>
     <span class="pill">Original resolution export</span>
     <span class="pill">No watermark</span>
-    <span class="mocktag">mock · nothing is processed</span>
   </div>
 
   <div class="example">
@@ -386,7 +391,7 @@
   <div class="checklist">
     <span><b>✓</b>Hair &amp; fine details</span>
     <span><b>✓</b>Transparent PNG</span>
-    <span><b>✓</b>Manual refinement</span>
+    <span><b>✓</b>Undo support</span>
     <span><b>✓</b>Full-resolution export</span>
     <span><b>✓</b>Runs locally</span>
   </div>
@@ -402,8 +407,7 @@
     <div class="mbline"><b id="prepMB">0 MB</b> / <span id="prepTotal">…</span> · <span id="prepPct">0%</span></div>
     <p class="tip" style="text-align:center">One-time download (~98 MB), then cached on this device. Your image never leaves it.</p>
     <div class="row" style="margin-top:18px">
-      <button class="btn ghost" id="btnPrepCancel">Back</button>
-      <button class="btn primary" id="btnPrepSkip">Skip wait (mock)</button>
+      <button class="btn ghost" id="btnPrepCancel" style="flex:1;justify-content:center">Back</button>
     </div>
   </div>
 </section>
@@ -416,7 +420,6 @@
     <div class="sep"></div>
     <button class="iconbtn" id="btnUndo" title="Undo (Ctrl+Z)">↩ <span class="hideM">Undo</span></button>
     <button class="iconbtn" id="btnRedo" title="Redo (Ctrl+Shift+Z)">↪ <span class="hideM">Redo</span></button>
-    <span class="mocktag hideM">mock · no AI wired</span>
     <div class="spacer"></div>
     <button class="btn small ghost hideM" id="btnSaveState">Save state</button>
     <button class="btn small primary" id="btnExport">Export ↓</button>
@@ -478,7 +481,6 @@
             <div class="skblock" style="height:18px;width:70%"></div>
           </div></div>
         </div>
-        <div id="hqBanner"><div class="in"><b>✓</b><span>Enhanced to high-quality mask</span><button id="btnKeepFast">Keep fast</button></div></div>
         <div class="statusbar">
           <button class="iconbtn" id="zoomOut" title="Zoom out">−</button>
           <span id="zoomLbl" style="font-family:var(--mono);min-width:46px;text-align:center">100%</span>
@@ -503,7 +505,7 @@
           <h3>REMOVE</h3>
           <div class="card">
             <div class="okline"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>Background removed</div>
-            <p class="desc" style="margin-top:6px">Subject detected · confidence <b style="color:var(--text)">98%</b> (mock)</p>
+            <p class="desc" style="margin-top:6px">Subject detected locally · runs on your device</p>
             <div class="row" style="margin-top:10px"><button class="btn small" id="btnRecompute">Recompute</button></div>
           </div>
           <div class="card">
@@ -631,8 +633,7 @@
   <div class="batch-head">
     <button class="iconbtn" data-goto="landing">←</button>
     <h2>Batch</h2>
-    <span class="pill">12 images · sequential queue (mock)</span>
-    <span class="mocktag">mock</span>
+    <span class="pill">Batch lands in a later update</span>
     <div class="spacer" style="flex:1"></div>
     <button class="btn small" id="btnBatchAdd">Add images</button>
     <button class="btn small primary" id="btnBatchExport">Export all</button>
@@ -663,36 +664,13 @@
     <div class="radio"><span class="r"></span>Current background</div>
     <div class="progress hidden" id="expProgWrap" style="margin-top:16px"><i id="expBar"></i></div>
     <div class="row" style="margin-top:16px"><button class="btn primary" id="btnDoExport">Export PNG</button></div>
-    <p class="tip" id="expNote">Mock — writes nothing.</p>
-  </div>
-</div>
-
-<div id="statesWrap">
-  <div class="scrim" data-close-states></div>
-  <div id="statesDrawer">
-    <button class="iconbtn x" data-close-states>✕</button>
-    <h2>Preview loading states</h2>
-    <p class="tip">Mock only — each button plays the real animation with fake timing. Nothing is processed.</p>
-    <div class="cap2">DOWNLOAD</div>
-    <button class="mini" data-state="download">Model download (0 → 120 MB)</button>
-    <button class="mini" data-state="hq">Fast → high-quality upgrade</button>
-    <div class="cap2">PROCESSING</div>
-    <button class="mini" data-state="scan">Segmentation scan halo</button>
-    <button class="mini" data-state="recompute">Region recompute</button>
-    <button class="mini" data-state="skeleton">Skeleton shimmer</button>
-    <div class="cap2">EXPORT &amp; BATCH</div>
-    <button class="mini" data-state="export">Export progress → done</button>
-    <button class="mini" data-state="batch">Batch queue progress</button>
-    <div class="cap2">FEEDBACK</div>
-    <button class="mini" data-state="toasts">Success + info toasts</button>
-    <button class="mini" data-state="error">Error message</button>
-    <div class="row" style="margin-top:14px"><button class="btn primary" id="btnPlayAll">Play all</button></div>
+    <p class="tip" id="expNote">Pick a format, then Export.</p>
   </div>
 </div>
 
 <div id="localPop">
   <h4>LOCAL PROCESSING</h4>
-  <p>Your image is processed on this device. Images are not uploaded to an RMBG server. The AI model was downloaded separately and is stored in this browser's cache. <span style="color:var(--faint)">(Mock copy.)</span></p>
+  <p>Your image is processed on this device. Images are not uploaded to an RMBG server. The AI model was downloaded separately and is stored in this browser's cache.</p>
 </div>
 
 <div id="fb">
@@ -707,7 +685,7 @@
 <script>
 "use strict";
 const $=s=>document.querySelector(s), $$=s=>Array.from(document.querySelectorAll(s));
-const MOCK=" (mock — nothing processed)";
+const MOCK=" (not yet available)";
 
 /* toasts */
 function toast(msg,err){
@@ -723,7 +701,6 @@ function showView(id){
   views.forEach(v=>$("#"+v).classList.toggle("on",v===id));
   try{
     document.querySelector("#exportWrap").classList.remove("on");
-    document.querySelector("#statesWrap").classList.remove("on");
     document.querySelector("#localPop").classList.remove("on");
     document.querySelector("#fb").classList.remove("on");
   }catch(_){}
@@ -756,7 +733,7 @@ document.addEventListener("paste",e=>{
   if(item)loadFile(item.getAsFile());
 });
 $("#btnSample").onclick=()=>startPreparing(true);
-$("#btnBatch").onclick=()=>{showView("view-batch");renderBatch();};
+$("#btnBatch").onclick=()=>toast("Batch processing lands in a later update");
 
 /* ingest (preview only) */
 let uploadedURL=null;
@@ -793,7 +770,6 @@ function finishPreparing(){
   setTimeout(()=>{showView("view-editor"); runScan("Detecting subject…"); setTimeout(()=>$("#fb").classList.add("on"),3200);},450);
 }
 $("#btnPrepCancel").onclick=()=>{clearInterval(prepTimer);showView("view-landing");};
-$("#btnPrepSkip").onclick=()=>{clearInterval(prepTimer);finishPreparing();};
 
 /* tool switching */
 function setTool(name){
@@ -1023,45 +999,6 @@ function renderBatch(animate){
 $("#btnBatchAdd").onclick=()=>toast("File picker"+MOCK);
 $("#btnBatchExport").onclick=()=>toast("Exporting batch as .zip"+MOCK);
 
-/* states playground */
-const statesWrap=$("#statesWrap");
-function openStates(){statesWrap.classList.add("on");}
-function closeStates(){statesWrap.classList.remove("on");}
-$$("[data-close-states]").forEach(b=>b.onclick=closeStates);
-if(!$("#btnStates")){
-  const b=document.createElement("button");
-  b.className="btn small ghost";b.id="btnStates";b.textContent="States";
-  b.title="Preview every loading state (mock)";
-  b.onclick=openStates;
-  $("#btnExport").before(b);
-}
-const landBtn=document.createElement("button");
-landBtn.className="btn ghost";landBtn.textContent="Preview states";
-landBtn.onclick=()=>{showView("view-editor");openStates();};
-document.querySelector("#view-landing .landing-row").appendChild(landBtn);
-$$("[data-state]").forEach(b=>b.onclick=()=>playState(b.dataset.state));
-function playState(s){
-  closeStates();
-  if(s==="download"){showView("view-preparing");startPreparing(true);}
-  if(s==="hq"){showView("view-editor");$("#hqBanner").classList.add("on");toast("Fast preview shown — HQ refining in background");}
-  if(s==="scan"){showView("view-editor");runScan("Detecting subject…");}
-  if(s==="recompute"){showView("view-editor");toast("Recomputing region…");runScan("Re-evaluating selection…");pushHist("recompute");}
-  if(s==="skeleton"){showView("view-editor");$("#skel").classList.add("on");setTimeout(()=>$("#skel").classList.remove("on"),2000);}
-  if(s==="export"){showView("view-editor");expWrap.classList.add("on");setTimeout(runExport,400);}
-  if(s==="batch"){showView("view-batch");renderBatch(true);}
-  if(s==="toasts"){toast("Background removed");setTimeout(()=>toast("Cached — works offline"),900);}
-  if(s==="error"){toast("Image too large for this device's memory — try a smaller file",true);}
-}
-$("#btnKeepFast").onclick=()=>{$("#hqBanner").classList.remove("on");toast("Staying on fast tier");};
-$("#btnPlayAll").onclick=async()=>{
-  closeStates();
-  const seq=["download","hq","scan","recompute","skeleton","export","batch","toasts"];
-  showView("view-editor");
-  toast("Playing all states — watch");
-  for(const s of seq){playState(s); await new Promise(r=>setTimeout(r,s==="download"?5200:3400));}
-  showView("view-editor");toast("Replay anytime via States");
-};
-
 /* shortcuts */
 document.addEventListener("keydown",e=>{
   const ed=$("#view-editor").classList.contains("on");
@@ -1072,7 +1009,7 @@ document.addEventListener("keydown",e=>{
   if(e.key.toLowerCase()==="b")setCompare(compareMode==="before"?"after":"before");
   if(e.key==="["){$("#brushSize").value=Math.max(4,+$("#brushSize").value-8);$("#brushSize").dispatchEvent(new Event("input"));}
   if(e.key==="]"){$("#brushSize").value=Math.min(160,+$("#brushSize").value+8);$("#brushSize").dispatchEvent(new Event("input"));}
-  if(e.key==="Escape"){expWrap.classList.remove("on");closeStates();localPop.classList.remove("on");}
+  if(e.key==="Escape"){expWrap.classList.remove("on");localPop.classList.remove("on");}
 });
 
 /* init */
