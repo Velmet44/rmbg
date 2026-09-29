@@ -72,7 +72,7 @@ Unsupported or undecodable input must produce: format name (when known), why it 
 
 - One primary action: remove background.
 - Detection mode default is `Auto` (general subject). An optional subject hint (`person`, `product`, `animal`, `auto`) may bias the model where supported; it must never be required.
-- Quality mode: `Fast` and `High quality` (see §6 for how they interact). The user must not need to understand the model to use either.
+- Quality mode: single automatic tier in V1 (fast model). The user must not need to understand the model to use it.
 - Recompute: re-run segmentation. Old result stays visible until the new result is ready.
 
 ### 3.3 Inspect
@@ -219,8 +219,8 @@ Binding constraints:
 
 First-run model download is the primary abandonment risk. The following are requirements, not suggestions:
 
-1. **Fetch on page load.** Model runtime + fast-tier weights begin downloading during landing idle, before any image is selected. Image selection and model download proceed in parallel.
-2. **Fast preview, background HQ upgrade.** Tier `fast` (the smaller/faster-inference model) renders the first result as quickly as possible. Tier `quality` continues downloading and, when ready, refines the mask automatically with a low-key status change (`Enhanced to high quality`). The user never waits for the large model to see value. Manual override (stay on Fast / force HQ) is available but not required. First-run download size is whatever the gated checkpoints measure (hundreds-of-MB class for current BiRefNet builds — the harness records exact bytes per revision); a truly tiny fast model and self-hosted weights on a well-peered CDN are Stage-2 optimizations, not S0 assumptions.
+1. **Fetch on page load.** Model runtime + weights begin downloading during landing idle, before any image is selected. Image selection and model download proceed in parallel.
+2. **Single tier, phased progress.** V1 ships one model (fast tier). The preparing screen reports honest phases: cache check → determinate MB download (only on cache miss) → session build → inference. A cached run shows "cached, no download needed" instead of a frozen bar. Inference runs in a Web Worker so the page stays interactive throughout.
 3. **Download vs upload messaging.** Any progress indicator distinguishes `Local AI model download (MB / total, cached after first visit)` from image handling. The image is never described as uploading to a server.
 4. **Working resolution first.** Inference runs at working resolution; full-resolution output is produced by upsampling the mask against original RGB (see §7). This bounds latency and memory while honoring original-resolution export.
 5. **Persistent cache.** Runtime and weights persist via Service Worker + Cache API / IndexedDB (whichever the adapter uses — exactly one owner, no dual caches). Return visits skip download entirely except for versioned manifest updates, which are diffed by checksum.
@@ -313,7 +313,7 @@ Weights, fixtures, and exports never enter git. Bundle contains code + manifests
 ### Stage 2 — Instant shell ⬜ NEXT
 
 - Landing ingest (picker, drop, paste, mobile picker), page-load model prefetch, Cache API/IndexedDB persistence.
-- Fast-first flow: fast preview immediately, HQ auto-upgrade in background, honest progress (download vs image handling), session reuse.
+- Fast-first flow: result as soon as the (single-tier) model is ready, honest phased progress (cache check → download → session build → inference), session reuse.
 - Before/after, split, mask/overlay inspection, 100% zoom + pan, export settings (format, resolution, background choice incl. JPEG guard).
 - Exit criteria: first-visit drop-to-preview feels instant after fast tier; return visit skips download; offline-after-cache test passes.
 
@@ -335,6 +335,7 @@ Weights, fixtures, and exports never enter git. Bundle contains code + manifests
 
 ### Deferred (not V1 unless gated)
 
+- High-quality second tier (GPU-only; cut 2026-09-29, fast tier suffices for V1).
 - Object eraser / inpainting (independent model gate).
 - AVIF export where encoding is unavailable, HEIC decode without bundled decoder.
 - Accounts, cloud, templates, API service, video.

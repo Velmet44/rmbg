@@ -1,0 +1,52 @@
+// RMBG inference worker: model download + session + segmentation run here,
+// the main thread stays responsive (progress, zoom/pan, cancel-safe).
+// No DOM in this file: engine + adapter only. Everything stays on-device;
+// the worker fetches model bytes into the same browser cache as the page.
+import { TransformersAdapter, createEngine, type ImageRef } from '@rmbg/engine';
+
+const MODEL_ID = 'studioludens/birefnet-lite-512';
+
+const adapter = new TransformersAdapter(MODEL_ID, { device: 'auto' });
+const engine = createEngine(adapter);
+let busy = false;
+
+self.onmessage = async (e: MessageEvent) => {
+  const msg = e.data;
+  if (msg?.type === 'init') {
+    try {
+      await adapter.init((p) =>
+        (self as any).postMessage({ id: msg.id, type: 'progress', ...p }),
+      );
+      (self as any).postMessage({ id: msg.id, type: 'ready', backend: adapter.backend });
+    } catch (err) {
+      (self as any).postMessage({ id: msg.id, type: 'error', message: String(err).slice(0, 300) });
+    }
+    return;
+  }
+  if (msg?.type === 'segment') {
+    if (busy) {
+      (self as any).postMessage({ id: msg.id, type: 'error', message: 'busy' });
+      return;
+    }
+    busy = true;
+    try {
+      const image: ImageRef = {
+        id: msg.imageId,
+        width: msg.w,
+        height: msg.h,
+        rgb: new Uint8ClampedArray(msg.rgb),
+      };
+      const mask = await engine.removeBackground(image, { hint: 'auto', tier: 'fast' });
+      (self as any).postMessage(
+        { id: msg.id, type: 'mask', w: mask.width, h: mask.height, alpha: mask.alpha.buffer },
+        [mask.alpha.buffer],
+      );
+    } catch (err) {
+      (self as any).postMessage({ id: msg.id, type: 'error', message: String(err).slice(0, 300) });
+    } finally {
+      busy = false;
+    }
+  }
+};
+
+export {};

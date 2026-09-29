@@ -20,28 +20,7 @@
       "bytesNote": "onnx/model_fp16.onnx measured 2026-09-29 via CDN headers; onnx/model.onnx (fp32, WASM CPU path) is 191877254 bytes",
       "checksum": "sha256:EFF9216BB2F9D3F023D9C2B7196845A7485739AB1F231593633E4D2344FFC516",
       "checksumNote": "computed 2026-09-29 over the CDN-fetched onnx/model_fp16.onnx",
-      "inputSize": 1024,
-      "backends": ["webgpu", "wasm"]
-    },
-    {
-      "modelId": "birefnet-general",
-      "tier": "quality",
-      "role": "default-quality",
-      "displayName": "BiRefNet 512 (high quality, GPU-only)",
-      "source": "https://huggingface.co/naddy24/birefnet-512-webgpu",
-      "revision": "ca02a86c094927479e2be583abe87f8ea73fcfda",
-      "weights": "naddy24/birefnet-512-webgpu",
-      "baseModel": "onnx-community/BiRefNet_512x512-ONNX",
-      "license": "MIT",
-      "licenseUrl": "https://huggingface.co/naddy24/birefnet-512-webgpu",
-      "attribution": "BiRefNet by Zheng et al. (CAAI AIR 2024); 512px browser export (empty ScatterND removed) by naddy24",
-      "modifications": "none by RMBG (upstream fp16 ONNX; fp16-only, no fp32 file)",
-      "files": ["onnx/model_fp16.onnx", "config.json", "preprocessor_config.json"],
-      "bytes": 473435223,
-      "bytesNote": "onnx/model_fp16.onnx measured 2026-09-29 (473 MB in 45 s); fp16-only so this tier requires WebGPU (no WASM CPU fallback)",
-      "checksum": "sha256:6EA208A51DE23AAB41F42489E5764D1C9D70896FBEF5F0A0666404DCD3C3B3D8",
-      "checksumNote": "computed 2026-09-29 over the CDN-fetched onnx/model_fp16.onnx",
-      "inputSize": 1024,
+      "inputSize": 512,
       "backends": ["webgpu", "wasm"]
     },
     {
@@ -66,6 +45,7 @@
   ],
   "notes": {
     "weightsPolicy": "Weights are never committed to git. This manifest is the only record; the harness verifies license + revision before measuring.",
-    "checksum": "checksum fields are filled by the harness after first verified download (SHA-256 of the fetched onnx files) and then pinned."
+    "checksum": "checksum fields are filled by the harness after first verified download (SHA-256 of the fetched onnx files) and then pinned.",
+    "qualityTier": "REMOVED 2026-09-29: the BiRefNet-512 GPU-only checkpoint was cut from the app per scope (fast tier is good enough for V1). Provenance preserved in git history + benchmarks/GATE.md."
   }
 }

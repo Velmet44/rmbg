@@ -83,7 +83,9 @@ export class TransformersAdapter implements SegmentationAdapter {
     const cb = progress
       ? (p: any) => {
           if (p.status === 'progress' && p.total) {
-            progress({ loaded: p.loaded ?? 0, total: p.total, file: p.file ?? p.name ?? 'model' });
+            progress({ status: 'progress', loaded: p.loaded ?? 0, total: p.total, file: p.file ?? p.name ?? 'model' });
+          } else if (p.status === 'initiate' || p.status === 'download' || p.status === 'done') {
+            progress({ status: p.status, file: p.file ?? p.name ?? 'model' });
           }
         }
       : undefined;

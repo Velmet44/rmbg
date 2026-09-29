@@ -1,31 +1,26 @@
-// RMBG app wiring (Stage 1). The mockup shell in index.html owns all UI
-// behavior; this module overrides the ingest/remove/export paths with the
-// real local engine. Everything runs on-device: Transformers.js downloads
-// model bytes into the browser cache once, image pixels never leave.
+// RMBG app wiring. The mockup shell in index.html owns all UI behavior;
+// this module overrides the ingest/remove/export paths with the real local
+// engine. Model download + session + segmentation run in a Web Worker, so
+// the page stays responsive; compositing/export stay on the main thread.
+// Everything runs on-device: model bytes go to the browser cache once,
+// image pixels never leave. Single model tier (fast).
 //
 // Not yet wired (later stages, UI toasts as such): refine brushes affect only
 // a visual overlay layer, background/effects panels, custom resolution, batch.
 
 import {
   OpLog,
-  TransformersAdapter,
   composite,
-  createEngine,
   type AlphaMask,
   type Background,
   type Effects,
   type ImageRef,
-  type QualityTier,
+  type ModelProgress,
 } from '@rmbg/engine';
 
 const W = window as unknown as Record<string, any>;
 const $ = (s: string) => document.querySelector(s) as HTMLElement;
 const $$ = (s: string) => Array.from(document.querySelectorAll(s)) as HTMLElement[];
-
-const MANIFEST: Record<QualityTier, string> = {
-  fast: 'studioludens/birefnet-lite-512',
-  quality: 'naddy24/birefnet-512-webgpu',
-};
 
 const FX_OFF: Effects = {
   shadow: { on: false, opacity: 0.4, blur: 18, dx: 0, dy: 12 },
@@ -38,20 +33,48 @@ interface AppState {
   image: ImageRef | null;
   previewURL: string | null;
   mask: AlphaMask | null;
-  tier: QualityTier;
   backend: string;
   log: OpLog;
 }
 
-const state: AppState = { image: null, previewURL: null, mask: null, tier: 'fast', backend: '…', log: new OpLog() };
-const adapters: Record<QualityTier, TransformersAdapter> = {
-  fast: new TransformersAdapter(MANIFEST.fast, { device: 'auto' }),
-  quality: new TransformersAdapter(MANIFEST.quality, { device: 'auto' }),
+const state: AppState = { image: null, previewURL: null, mask: null, backend: '…', log: new OpLog() };
+
+// ---------- worker client ----------
+// One request at a time (the worker enforces it too); responses route by id.
+// Progress events stream separately so the bar and phase text stay live.
+const worker = new Worker(new URL('./infer-worker.ts', import.meta.url), { type: 'module' });
+let reqId = 0;
+interface Pending {
+  resolve: (v: any) => void;
+  reject: (e: Error) => void;
+  onProgress?: (p: ModelProgress & { id: number; type: string }) => void;
+}
+const pending = new Map<number, Pending>();
+worker.onmessage = (e: MessageEvent) => {
+  const m = e.data;
+  if (m?.type === 'progress') {
+    pending.get(m.id)?.onProgress?.(m);
+    return;
+  }
+  const p = pending.get(m?.id);
+  if (!p) return;
+  pending.delete(m.id);
+  if (m?.type === 'error') p.reject(new Error(m.message || 'worker failed'));
+  else p.resolve(m);
 };
-const engines = {
-  fast: createEngine(adapters.fast),
-  quality: createEngine(adapters.quality),
+worker.onerror = (e) => {
+  W.toast?.(`Background worker crashed: ${(e as ErrorEvent).message || 'unknown'} — reload to retry`, true);
 };
+function callWorker(
+  msg: Record<string, any>, transfer?: Transferable[],
+  onProgress?: Pending['onProgress'],
+): Promise<any> {
+  const id = ++reqId;
+  return new Promise((resolve, reject) => {
+    pending.set(id, { resolve, reject, onProgress });
+    worker.postMessage({ ...msg, id }, transfer ?? []);
+  });
+}
 
 // ---------- helpers ----------
 
@@ -65,15 +88,57 @@ function fmtMB(n: number): string {
   return n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.round(n / 1024)} KB`;
 }
 
-/** Aggregate per-file progress events into one determinate bar. */
-function trackDownload(onFrac: (frac: number, label: string) => void) {
-  const files = new Map<string, { loaded: number; total: number }>();
-  return (p: { file: string; loaded: number; total: number }) => {
-    files.set(p.file, { loaded: p.loaded, total: p.total });
+/** Phased, honest progress for worker init.
+ *  - initiate with no later download = served from cache.
+ *  - download + progress = bytes flowing (determinate MB bar).
+ *  - all done = session build ("Loading into memory…").
+ *  Cached runs emit no byte events at all, so a watchdog flips the label
+ *  instead of hanging on "starting…". */
+function makeInitProgress() {
+  const pendingFiles = new Set<string>();
+  const bytes = new Map<string, { loaded: number; total: number }>();
+  let sawDownload = false;
+  let finished = false;
+  const draw = () => {
     let l = 0, t = 0;
-    for (const f of files.values()) { l += f.loaded; t += f.total; }
-    onFrac(t ? l / t : 0, `${fmtMB(l)} / ${fmtMB(t)} · cached after first visit`);
+    for (const f of bytes.values()) { l += f.loaded; t += f.total; }
+    if (t > 0) setBar(l / t, `${fmtMB(l)} / ${fmtMB(t)} · cached after first visit`);
   };
+  const timer = setTimeout(() => {
+    if (!finished && !sawDownload) {
+      $('#prepTitle').textContent = 'Model cached — loading…';
+      setBar(0, 'found in this browser, no download needed');
+    }
+  }, 1500);
+  return {
+    onEvent(p: ModelProgress) {
+      if (finished) return;
+      if (p.status === 'initiate') pendingFiles.add(p.file);
+      else if (p.status === 'download') { sawDownload = true; pendingFiles.add(p.file); }
+      else if (p.status === 'progress' && p.total) {
+        sawDownload = true;
+        bytes.set(p.file, { loaded: p.loaded ?? 0, total: p.total });
+        draw();
+      } else if (p.status === 'done') {
+        pendingFiles.delete(p.file);
+        if (sawDownload && pendingFiles.size === 0) {
+          $('#prepTitle').textContent = 'Preparing local AI…';
+          setBar(1, 'download complete — loading into memory…');
+        }
+      }
+    },
+    finish() { finished = true; clearTimeout(timer); },
+  };
+}
+
+async function ensureReady(): Promise<void> {
+  const tracker = makeInitProgress();
+  try {
+    const res = await callWorker({ type: 'init' }, undefined, (p) => tracker.onEvent(p));
+    state.backend = res.backend ?? 'unknown';
+  } finally {
+    tracker.finish();
+  }
 }
 
 async function decodeToImageRef(f: File, id: string): Promise<ImageRef> {
@@ -214,13 +279,15 @@ async function realLoadFile(f: File) {
   }
 }
 
-async function ensureAdapter(tier: QualityTier): Promise<void> {
-  const ad = adapters[tier];
-  if ((ad as any).backend) { state.backend = (ad as any).backend; return; }
-  await ad.init(trackDownload((frac, label) => {
-    setBar(frac, label);
-  }));
-  state.backend = ad.backend ?? 'unknown';
+async function segmentCurrent(label: string): Promise<AlphaMask> {
+  const img = state.image!;
+  // Copy: the buffer is transferred to the worker (neutering the copy keeps
+  // the main-thread original intact for compositing).
+  const copy = new Uint8ClampedArray(img.rgb);
+  const res = await callWorker({ type: 'segment', imageId: img.id, w: img.width, h: img.height, rgb: copy.buffer }, [copy.buffer]);
+  const mask: AlphaMask = { width: res.w, height: res.h, alpha: new Float32Array(res.alpha) };
+  state.log.commitRegion(mask, label, () => null);
+  return mask;
 }
 
 async function realStart(_withDemo: boolean) {
@@ -228,23 +295,19 @@ async function realStart(_withDemo: boolean) {
   W.showView('view-preparing');
   ($('#prepRing') as HTMLElement).style.display = 'block';
   $('#prepTitle').textContent = 'Preparing local AI…';
-  setBar(0, 'starting…');
+  setBar(0, 'Checking cache…');
   try {
-    // Fast tier first for an instant result (SPEC §6); HQ refines in background.
-    await ensureAdapter('fast');
-    state.tier = 'fast';
+    await ensureReady();
+    $('#prepTitle').textContent = 'Removing background…';
+    setBar(1, `running on-device (${state.backend}) — the page stays usable`);
     const t0 = performance.now();
-    const mask = await engines.fast.removeBackground(state.image, { tier: 'fast' });
-    state.mask = mask;
-    state.log.commitRegion(mask, 'ai', () => null);
-    syncTierRadios();
+    state.mask = await segmentCurrent('ai');
     W.showView('view-editor');
     lastCompare = 'after';
     refreshDisplay();
     W.runScan('Detecting subject…');
-    W.toast(`Fast preview in ${((performance.now() - t0) / 1000).toFixed(1)}s · HQ refining in background (${state.backend})`);
+    W.toast(`Background removed in ${((performance.now() - t0) / 1000).toFixed(1)}s · ${state.backend}`);
     setTimeout(() => $('#fb').classList.add('on'), 2500);
-    upgradeToQuality();
   } catch (e) {
     $('#prepTitle').textContent = 'Could not start the local model';
     setBar(0, 'failed — check connection once for the one-time download, then retry');
@@ -252,41 +315,11 @@ async function realStart(_withDemo: boolean) {
   }
 }
 
-async function upgradeToQuality() {
-  if (!state.image) return;
-  try {
-    await ensureAdapter('quality');
-    if (!state.image) return; // user moved on
-    const mask = await engines.quality.removeBackground(state.image, { tier: 'quality' });
-    state.mask = mask;
-    state.log.commitRegion(mask, 'ai-hq', () => null);
-    state.tier = 'quality';
-    syncTierRadios();
-    lastCompare = lastCompare === 'before' ? 'before' : 'after';
-    refreshDisplay();
-    ($('#hqBanner') as HTMLElement).classList.add('on');
-    // One live inference session per page: free the fast tier's GPU memory.
-    // Switching back re-inits from cache (files stay, session rebuild ~15 s).
-    void adapters.fast.dispose().catch(() => {});
-  } catch (e) {
-    W.toast('HQ model unavailable — staying on fast tier', true);
-  }
-}
-
-function syncTierRadios() {
-  $$('[data-ai]').forEach((r) => {
-    const el = r as HTMLElement;
-    el.classList.toggle('on', (el.dataset.ai === 'hq') === (state.tier === 'quality'));
-  });
-}
-
-async function rerunCurrentTier() {
+async function rerun() {
   if (!state.image) return;
   W.runScan('Recomputing…');
   try {
-    const mask = await engines[state.tier].removeBackground(state.image, { tier: state.tier });
-    state.mask = mask;
-    state.log.commitRegion(mask, 'recompute', () => null);
+    state.mask = await segmentCurrent('recompute');
     refreshDisplay();
     W.toast('Recomputed');
   } catch (e) {
@@ -347,7 +380,7 @@ async function realExport() {
 }
 
 // Introspection for verification/debugging (harmless in production).
-(window as unknown as Record<string, any>).__rmbg = { state, adapters, engines };
+(window as unknown as Record<string, any>).__rmbg = { state };
 
 // ---------- install overrides ----------
 
@@ -356,15 +389,15 @@ W.startPreparing = realStart;
 W.setCompare = realCompare;
 W.runExport = realExport;
 
-$('#btnRecompute').addEventListener('click', () => { void rerunCurrentTier(); });
+$('#btnRecompute').addEventListener('click', () => { void rerun(); });
 function syncUndoRedo() {
   ( $('#btnUndo') as HTMLButtonElement).disabled = !state.log.canUndo || !state.mask;
   ( $('#btnRedo') as HTMLButtonElement).disabled = !state.log.canRedo || !state.mask;
 }
 
 // Real undo/redo over the operation log (the mockup shell binds mock
-// handlers directly, so rebind). Covers AI removal, recompute, tier
-// switches — brush-level ops arrive with Stage 3.
+// handlers directly, so rebind). Covers AI removal and recomputation;
+// brush-level ops arrive with Stage 3.
 ($('#btnUndo') as HTMLButtonElement).onclick = () => {
   if (!state.mask) return;
   const label = state.log.undo(state.mask);
@@ -379,36 +412,11 @@ function syncUndoRedo() {
 };
 // The mockup shell binds the mock export directly; rebind to the real one.
 ($('#btnDoExport') as HTMLButtonElement).onclick = () => { void realExport(); };
-$$('[data-ai]').forEach((r) => {
-  (r as HTMLElement).addEventListener('click', async () => {
-    const want: QualityTier = (r as HTMLElement).dataset.ai === 'hq' ? 'quality' : 'fast';
-    if (!state.image || want === state.tier) return;
-    W.toast(`Switching to ${want} tier…`);
-    W.showView('view-preparing');
-    $('#prepTitle').textContent = 'Preparing local AI…';
-    try {
-      await ensureAdapter(want);
-      state.tier = want;
-      // Keep a single live session: dispose the tier we leave.
-      const other = want === 'quality' ? adapters.fast : adapters.quality;
-      void other.dispose().catch(() => {});
-      const mask = await engines[want].removeBackground(state.image, { tier: want });
-      state.mask = mask;
-      state.log.commitRegion(mask, 'tier-switch', () => null);
-      syncTierRadios();
-      W.showView('view-editor');
-      refreshDisplay();
-    } catch (e) {
-      W.showView('view-editor');
-      W.toast(`Tier switch failed: ${String(e).slice(0, 120)}`, true);
-    }
-  });
-});
 
-// Prefetch the fast model on page load so the first drop feels instant.
+// Prefetch the model on page load so the first drop starts warm.
 // One-time download into the browser cache; silent unless it fails.
-adapters.fast.init().then(
-  () => { state.backend = adapters.fast.backend ?? 'cached'; },
+callWorker({ type: 'init' }).then(
+  (res) => { state.backend = res.backend ?? 'cached'; },
   () => { /* first real use will surface the error with UI */ },
 );
 

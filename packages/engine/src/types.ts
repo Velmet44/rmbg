@@ -34,7 +34,15 @@ export interface Effects {
   defringe: number;
 }
 
-export interface ModelProgress { loaded: number; total: number; file: string; }
+export interface ModelProgress {
+  /** initiate: file started (no download event after = served from cache).
+   *  download: fetch began (cache miss). progress: bytes flowing.
+   *  done: file complete. */
+  status: 'initiate' | 'download' | 'progress' | 'done';
+  file: string;
+  loaded?: number;
+  total?: number;
+}
 
 export interface SegmentOpts { hint: SubjectHint; tier: QualityTier; }
 
