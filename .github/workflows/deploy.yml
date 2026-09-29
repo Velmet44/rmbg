@@ -42,3 +42,4 @@ jobs:
     steps:
       - id: deployment
         uses: actions/deploy-pages@v4
+# Trigger Pages deployment with GitHub Actions source enabled
