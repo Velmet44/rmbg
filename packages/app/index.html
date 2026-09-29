@@ -1,0 +1,1090 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>RMBG — UI Mockup (no features wired)</title>
+<link rel="icon" href="data:," />
+<style>
+  :root{
+    --bg:#0b0d0f; --bg2:#101315; --panel:#14181c; --panel2:#191e23;
+    --border:#242b32; --border-soft:#1e242a;
+    --text:#e9edf0; --muted:#98a2ab; --faint:#6b757e;
+    --accent:#34d399; --accent-dim:rgba(52,211,153,.14);
+    --danger:#f87171; --warn:#fbbf24;
+    --radius:10px; --radius-s:7px;
+    --font:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,"Helvetica Neue",Arial,sans-serif;
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{background:var(--bg);color:var(--text);font-family:var(--font);font-size:14px;overflow:hidden;
+    -webkit-font-smoothing:antialiased}
+  button{font-family:inherit;cursor:pointer}
+  :focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
+
+  /* ---------- generic ---------- */
+  .btn{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--border);
+    background:var(--panel2);color:var(--text);border-radius:var(--radius-s);
+    padding:9px 14px;font-size:13.5px;font-weight:550;transition:all .15s ease;white-space:nowrap}
+  .btn:hover{border-color:#3a434d;background:#20262c;transform:translateY(-1px)}
+  .btn:active{transform:translateY(0)}
+  .btn.primary{background:var(--accent);border-color:var(--accent);color:#06281c;font-weight:700}
+  .btn.primary:hover{background:#4be0a8;box-shadow:0 4px 18px rgba(52,211,153,.35)}
+  .btn.ghost{background:transparent}
+  .btn.small{padding:6px 10px;font-size:12.5px}
+  .btn:disabled{opacity:.45;cursor:not-allowed;transform:none}
+  .iconbtn{display:inline-flex;align-items:center;justify-content:center;min-width:32px;height:32px;
+    padding:0 8px;border:1px solid transparent;background:transparent;color:var(--muted);
+    border-radius:var(--radius-s);font-size:13px;gap:6px;transition:all .15s}
+  .iconbtn:hover{background:var(--panel2);color:var(--text);border-color:var(--border)}
+  .iconbtn.active{color:var(--accent);background:var(--accent-dim);border-color:rgba(52,211,153,.4)}
+  .iconbtn:disabled{opacity:.35;cursor:default;background:none}
+  .pill{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600;
+    border:1px solid var(--border);border-radius:99px;padding:4px 10px;color:var(--muted);
+    background:var(--panel)}
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--accent);
+    box-shadow:0 0 8px var(--accent);animation:pulse 2s infinite}
+  @keyframes pulse{50%{opacity:.5}}
+  .mocktag{font-size:10px;font-weight:600;letter-spacing:.08em;color:var(--faint);
+    border:1px solid var(--border);border-radius:6px;padding:3px 8px;text-transform:uppercase;background:transparent}
+
+  /* ---------- views ---------- */
+  .view{position:fixed;inset:0;display:none;flex-direction:column;animation:viewIn .3s ease}
+  .view.on{display:flex}
+  @keyframes viewIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+
+  /* ---------- landing ---------- */
+  #view-landing{align-items:center;justify-content:center;padding:24px;overflow-y:auto;
+    background:radial-gradient(900px 480px at 50% 18%,rgba(52,211,153,.07),transparent 70%)}
+  .brand{font-size:15px;font-weight:800;letter-spacing:.28em;color:var(--text);margin-bottom:10px}
+  .brand span{color:var(--accent)}
+  .hero-title{font-size:clamp(26px,4.5vw,42px);font-weight:750;letter-spacing:-.02em;text-align:center}
+  .hero-sub{color:var(--muted);margin-top:8px;text-align:center;font-size:15px}
+  .dropzone{margin-top:28px;width:min(560px,92vw);border:1.5px dashed #333c45;border-radius:16px;
+    background:var(--panel);padding:44px 24px;text-align:center;cursor:pointer;
+    transition:all .2s ease;position:relative;overflow:hidden}
+  .dropzone:hover,.dropzone.drag{border-color:var(--accent);background:#151c18;
+    box-shadow:0 0 0 4px rgba(52,211,153,.08),0 18px 50px rgba(0,0,0,.45);transform:translateY(-2px)}
+  .dropzone .big{font-size:17px;font-weight:650}
+  .dropzone .small{color:var(--muted);margin-top:6px;font-size:13px}
+  .dropzone .formats{margin-top:14px;font-size:11.5px;color:var(--faint);font-family:var(--mono)}
+  .landing-row{display:flex;gap:10px;margin-top:18px;flex-wrap:wrap;justify-content:center}
+  .trust{margin-top:22px;display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
+  .checklist{margin-top:26px;display:flex;gap:16px;flex-wrap:wrap;justify-content:center;
+    color:var(--muted);font-size:12.5px}
+  .checklist b{color:var(--accent);margin-right:5px}
+  .example{margin-top:26px;display:flex;gap:14px;align-items:stretch;flex-wrap:wrap;justify-content:center}
+  .example figure{width:220px;border:1px solid var(--border);border-radius:12px;overflow:hidden;background:var(--panel)}
+  .example figcaption{font-size:11px;color:var(--muted);padding:8px 10px;letter-spacing:.08em;font-weight:700}
+  .example .img{height:150px;display:flex;align-items:center;justify-content:center}
+
+  /* ---------- preparing ---------- */
+  #view-preparing{align-items:center;justify-content:center;padding:24px}
+  .prep-card{width:min(480px,92vw);background:var(--panel);border:1px solid var(--border);
+    border-radius:16px;padding:32px 30px;text-align:center;box-shadow:0 24px 70px rgba(0,0,0,.5)}
+  .prep-card h2{font-size:18px;margin:14px 0 6px}
+  .prep-card p{color:var(--muted);font-size:13px;line-height:1.55}
+  .ring{width:58px;height:58px;margin:0 auto;border-radius:50%;
+    border:3px solid var(--border);border-top-color:var(--accent);animation:spin 1s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .progress{height:10px;background:#0d1114;border:1px solid var(--border);border-radius:99px;
+    margin-top:20px;overflow:hidden;position:relative}
+  .progress i{display:block;height:100%;width:0;border-radius:99px;
+    background:linear-gradient(90deg,#1f9d6c,var(--accent));transition:width .2s;
+    box-shadow:0 0 12px rgba(52,211,153,.6)}
+  .progress.shimmer::after{content:"";position:absolute;inset:0;
+    background:linear-gradient(100deg,transparent 30%,rgba(255,255,255,.14) 50%,transparent 70%);
+    animation:shimmer 1.4s infinite}
+  @keyframes shimmer{from{transform:translateX(-100%)}to{transform:translateX(100%)}}
+  .mbline{margin-top:10px;font-family:var(--mono);font-size:12px;color:var(--muted)}
+  .mbline b{color:var(--text)}
+
+  /* ---------- editor frame ---------- */
+  #view-editor{overflow:hidden}
+  .topbar{height:50px;flex:0 0 50px;display:flex;align-items:center;gap:10px;padding:0 12px;
+    background:var(--bg2);border-bottom:1px solid var(--border);z-index:30}
+  .topbar .logo{font-weight:800;letter-spacing:.22em;font-size:13px;margin-right:4px}
+  .topbar .logo span{color:var(--accent)}
+  .topbar .sep{width:1px;height:22px;background:var(--border)}
+  .topbar .spacer{flex:1}
+  .work{display:flex;flex:1;min-height:0}
+  /* left rail */
+  .rail{width:196px;flex:0 0 196px;background:var(--bg2);border-right:1px solid var(--border);
+    padding:12px 10px;display:flex;flex-direction:column;gap:4px;overflow-y:auto}
+  .rail .cap{font-size:10.5px;font-weight:700;letter-spacing:.12em;color:var(--faint);padding:8px 10px 4px}
+  .tool{display:flex;align-items:center;gap:10px;width:100%;text-align:left;border:1px solid transparent;
+    background:transparent;color:var(--muted);border-radius:9px;padding:10px 12px;font-size:13.5px;
+    font-weight:600;transition:all .15s}
+  .tool .ic{width:22px;text-align:center;font-size:15px}
+  .tool:hover{background:var(--panel2);color:var(--text)}
+  .tool.on{background:var(--accent-dim);border-color:rgba(52,211,153,.45);color:var(--text)}
+  .tool.on .ic{color:var(--accent)}
+  .tool.hero{border-color:rgba(52,211,153,.35)}
+  .tool .kbd{margin-left:auto;font-size:10px;color:var(--faint);font-family:var(--mono)}
+  /* canvas */
+  .stage-wrap{flex:1;min-width:0;display:flex;flex-direction:column;background:#08090b;position:relative}
+  .stage{flex:1;min-height:0;position:relative;overflow:hidden;cursor:grab;
+    background:radial-gradient(1000px 600px at 50% 40%,#10141a,#08090b)}
+  .stage.panning{cursor:grabbing}
+  .stage.brushing{cursor:none}
+  #viewport{position:absolute;left:50%;top:50%;transform-origin:center center}
+  .checker{background-image:conic-gradient(#20262d 0 25%,#171c21 0 50%,#20262d 0 75%,#171c21 0);
+    background-size:16px 16px;border-radius:6px;box-shadow:0 30px 80px rgba(0,0,0,.6);
+    border:1px solid #2b333c;overflow:hidden;position:relative}
+  .checker img,.checker svg{display:block}
+  #paintLayer{position:absolute;inset:0;pointer-events:none}
+  #brushRing{position:fixed;display:none;width:60px;height:60px;border:1.5px solid #fff;border-radius:50%;
+    pointer-events:none;z-index:60;box-shadow:0 0 0 1.5px rgba(0,0,0,.7),inset 0 0 0 1px rgba(0,0,0,.4);
+    transform:translate(-50%,-50%)}
+  #brushRing .dotc{position:absolute;left:50%;top:50%;width:3px;height:3px;background:#fff;border-radius:50%;
+    transform:translate(-50%,-50%)}
+  /* split */
+  #splitUI{position:absolute;inset:0;display:none}
+  #splitUI.on{display:block}
+  #splitR{background-image:conic-gradient(#20262d 0 25%,#171c21 0 50%,#20262d 0 75%,#171c21 0);
+    background-size:16px 16px}
+  #splitUI .half{position:absolute;inset:0;overflow:hidden}
+  #splitUI .tag{position:absolute;top:10px;font-size:10.5px;font-weight:800;letter-spacing:.1em;
+    background:rgba(0,0,0,.65);border:1px solid var(--border);padding:4px 9px;border-radius:6px;color:var(--muted)}
+  #splitDiv{position:absolute;top:0;bottom:0;width:2px;background:var(--accent);cursor:ew-resize;
+    box-shadow:0 0 12px rgba(52,211,153,.8)}
+  #splitDiv::after{content:"◂ ▸";position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+    background:var(--accent);color:#06281c;font-size:9px;font-weight:800;border-radius:99px;padding:4px 7px}
+  .scan{position:absolute;inset:0;display:none;align-items:center;justify-content:center;pointer-events:none}
+  .scan.on{display:flex}
+  .scan .halo{position:absolute;inset:6%;border:1.5px solid var(--accent);border-radius:8px;opacity:.8;
+    animation:scanPulse 1.6s ease-in-out infinite}
+  .scan .lbl{background:rgba(0,0,0,.72);border:1px solid rgba(52,211,153,.5);color:var(--accent);
+    font-size:12px;font-weight:700;border-radius:99px;padding:7px 14px;letter-spacing:.02em}
+  @keyframes scanPulse{50%{opacity:.25;inset:9%}}
+  /* bottom bar */
+  .statusbar{flex:0 0 38px;display:flex;align-items:center;gap:8px;padding:0 12px;
+    background:var(--bg2);border-top:1px solid var(--border);font-size:12.5px;color:var(--muted);z-index:30}
+  .statusbar .spacer{flex:1}
+  .seg{display:flex;background:#0d1114;border:1px solid var(--border);border-radius:8px;overflow:hidden}
+  .seg button{border:0;background:transparent;color:var(--muted);font-size:11.5px;font-weight:700;
+    padding:6px 11px;letter-spacing:.03em}
+  .seg button.on{background:var(--panel2);color:var(--accent)}
+  #localBtn{display:inline-flex;align-items:center;gap:7px;background:none;border:1px solid transparent;
+    color:var(--muted);font-size:12px;border-radius:7px;padding:5px 9px}
+  #localBtn:hover{border-color:var(--border);color:var(--text)}
+  /* right panel */
+  .ctx{width:288px;flex:0 0 288px;background:var(--bg2);border-left:1px solid var(--border);
+    overflow-y:auto;padding:16px 14px 24px;z-index:20}
+  .ctx h3{font-size:11px;font-weight:800;letter-spacing:.14em;color:var(--faint);margin:2px 2px 12px}
+  .panel{display:none;animation:panelIn .22s ease}
+  .panel.on{display:block}
+  @keyframes panelIn{from{opacity:0;transform:translateX(8px)}to{opacity:1;transform:none}}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);
+    padding:13px;margin-bottom:12px}
+  .card.tight{padding:10px}
+  .card h4{font-size:13px;font-weight:700;margin-bottom:4px}
+  .card p.desc{font-size:12.5px;color:var(--muted);line-height:1.5}
+  .okline{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:650;color:var(--accent)}
+  .row{display:flex;gap:8px}
+  .row .btn{flex:1;justify-content:center}
+  .radio{display:flex;align-items:center;gap:9px;padding:9px 10px;border:1px solid var(--border);
+    border-radius:8px;margin-top:8px;cursor:pointer;font-size:13px;transition:all .13s}
+  .radio:hover{border-color:#3a434d}
+  .radio.on{border-color:rgba(52,211,153,.55);background:var(--accent-dim)}
+  .radio .r{width:14px;height:14px;border-radius:50%;border:2px solid var(--faint);flex:0 0 14px}
+  .radio.on .r{border-color:var(--accent);background:var(--accent);box-shadow:inset 0 0 0 2.5px #10151a}
+  .slider-row{margin-top:12px}
+  .slider-row label{display:flex;justify-content:space-between;font-size:12.5px;color:var(--muted);margin-bottom:6px}
+  .slider-row label b{color:var(--text);font-family:var(--mono);font-weight:600}
+  input[type=range]{width:100%;accent-color:var(--accent);height:22px;cursor:pointer}
+  .choice2{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:4px}
+  .choice{background:var(--panel);border:1px solid var(--border);border-radius:9px;padding:12px 8px;
+    text-align:center;color:var(--muted);transition:all .14s}
+  .choice:hover{border-color:#3a434d;color:var(--text);transform:translateY(-1px)}
+  .choice.on{border-color:rgba(52,211,153,.55);background:var(--accent-dim);color:var(--text)}
+  .choice .e{font-size:19px;display:block;margin-bottom:6px}
+  .choice .t{font-size:12px;font-weight:700}
+  .mini{background:none;border:1px solid var(--border);color:var(--muted);border-radius:7px;
+    padding:7px 10px;font-size:12.5px;width:100%;margin-top:8px;transition:all .13s}
+  .mini:hover{color:var(--text);border-color:#3a434d}
+  .mini.on{color:var(--accent);border-color:rgba(52,211,153,.5);background:var(--accent-dim)}
+  .swatches{display:flex;gap:7px;margin-top:10px}
+  .sw{width:26px;height:26px;border-radius:50%;border:2px solid transparent;cursor:pointer;transition:all .13s}
+  .sw:hover{transform:scale(1.12)}
+  .sw.on{border-color:#fff;box-shadow:0 0 0 2px var(--accent)}
+  .colorline{display:flex;align-items:center;gap:10px;margin-top:10px}
+  .colorline input[type=color]{width:38px;height:30px;border:1px solid var(--border);border-radius:7px;
+    background:none;padding:2px;cursor:pointer}
+  .colorline code{font-family:var(--mono);font-size:12.5px;color:var(--muted)}
+  .hidden{display:none!important}
+  .tip{font-size:11.5px;color:var(--faint);line-height:1.55;margin-top:10px}
+  .tip b{color:var(--muted)}
+
+  /* export drawer */
+  #exportWrap{position:fixed;inset:0;display:none;z-index:80}
+  #exportWrap.on{display:block}
+  #exportWrap .scrim{position:absolute;inset:0;background:rgba(0,0,0,.55);animation:viewIn .2s}
+  #exportDrawer{position:absolute;top:0;right:0;bottom:0;width:min(360px,94vw);background:var(--bg2);
+    border-left:1px solid var(--border);padding:20px 18px;overflow-y:auto;
+    animation:drawerIn .25s cubic-bezier(.2,.9,.25,1)}
+  @keyframes drawerIn{from{transform:translateX(40px);opacity:0}to{transform:none;opacity:1}}
+  #exportDrawer h2{font-size:15px;letter-spacing:.02em}
+  #exportDrawer .x{float:right}
+  .fmtgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:10px}
+  .fmt{border:1px solid var(--border);background:var(--panel);border-radius:8px;padding:10px 4px;
+    font-size:12.5px;font-weight:700;color:var(--muted);transition:all .13s}
+  .fmt.on{border-color:rgba(52,211,153,.55);background:var(--accent-dim);color:var(--text)}
+  .dims{font-family:var(--mono);font-size:12px;color:var(--muted);margin-top:8px}
+
+  /* popover (local) */
+  #localPop{position:fixed;display:none;z-index:90;width:290px;background:var(--panel2);
+    border:1px solid var(--border);border-radius:12px;padding:15px;box-shadow:0 18px 50px rgba(0,0,0,.6);
+    animation:panelIn .18s}
+  #localPop.on{display:block}
+  #localPop h4{font-size:12px;letter-spacing:.1em;margin-bottom:8px}
+  #localPop p{font-size:12.5px;color:var(--muted);line-height:1.55}
+
+  /* toast */
+  #toasts{position:fixed;bottom:52px;left:50%;transform:translateX(-50%);z-index:120;
+    display:flex;flex-direction:column;gap:8px;align-items:center;pointer-events:none}
+  .toast{background:#1c2228;border:1px solid var(--border);border-left:3px solid var(--accent);
+    border-radius:9px;padding:10px 16px;font-size:13px;box-shadow:0 12px 30px rgba(0,0,0,.5);
+    animation:toastIn .25s cubic-bezier(.2,.9,.3,1.2)}
+  @keyframes toastIn{from{opacity:0;transform:translateY(10px) scale(.96)}to{opacity:1;transform:none}}
+  .toast.out{opacity:0;transform:translateY(6px);transition:all .3s}
+
+  /* feedback bubble */
+  #fb{position:absolute;right:304px;bottom:52px;z-index:40;background:var(--panel2);
+    border:1px solid var(--border);border-radius:12px;padding:12px 14px;width:250px;
+    box-shadow:0 14px 40px rgba(0,0,0,.5);display:none;animation:panelIn .2s}
+  #fb.on{display:block}
+  #fb p{font-size:12.5px;margin-bottom:10px}
+  #fb .row{display:flex;gap:8px}
+
+  /* batch */
+  #view-batch{padding:0;overflow:hidden}
+  .batch-head{padding:18px 22px 0;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  .batch-head h2{font-size:17px}
+  .batch-grid{flex:1;overflow-y:auto;display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));
+    gap:14px;padding:18px 22px 30px;align-content:start}
+  .bthumb{background:var(--panel);border:1px solid var(--border);border-radius:12px;overflow:hidden;
+    transition:all .15s;cursor:pointer;position:relative}
+  .bthumb:hover{transform:translateY(-2px);border-color:#3a434d}
+  .bthumb .im{height:120px;display:flex;align-items:center;justify-content:center;position:relative}
+  .bthumb .meta{padding:9px 11px;font-size:11.5px;color:var(--muted);display:flex;
+    justify-content:space-between;align-items:center;font-family:var(--mono)}
+  .badge{font-size:10px;font-weight:800;letter-spacing:.06em;border-radius:99px;padding:3px 9px;
+    text-transform:uppercase}
+  .badge.ok{background:var(--accent-dim);color:var(--accent);border:1px solid rgba(52,211,153,.4)}
+  .badge.run{background:rgba(251,191,36,.1);color:var(--warn);border:1px solid rgba(251,191,36,.4)}
+  .badge.wait{background:var(--panel2);color:var(--faint);border:1px solid var(--border)}
+  .badge.err{background:rgba(248,113,113,.1);color:var(--danger);border:1px solid rgba(248,113,113,.4)}
+  .bthumb .bar{position:absolute;left:0;right:0;bottom:0;height:3px;background:#0d1114}
+  .bthumb .bar i{display:block;height:100%;background:var(--accent)}
+
+  /* ---------- state playground / skeleton / hq banner ---------- */
+  #statesWrap{position:fixed;inset:0;display:none;z-index:80}
+  #statesWrap.on{display:block}
+  #statesWrap .scrim{position:absolute;inset:0;background:rgba(0,0,0,.55)}
+  #statesDrawer{position:absolute;top:0;right:0;bottom:0;width:min(320px,94vw);background:var(--bg2);
+    border-left:1px solid var(--border);padding:20px 18px;overflow-y:auto;
+    animation:drawerIn .25s cubic-bezier(.2,.9,.25,1)}
+  #statesDrawer h2{font-size:15px}
+  #statesDrawer .x{float:right}
+  .cap2{font-size:10.5px;font-weight:800;letter-spacing:.12em;color:var(--faint);margin:16px 2px 4px}
+  #hqBanner{flex:0 0 0;overflow:hidden;background:#0f1a15;border-bottom:1px solid rgba(52,211,153,.35);
+    color:var(--text);font-size:12.5px;max-height:0;transition:max-height .3s ease}
+  #hqBanner.on{max-height:44px;flex-basis:auto}
+  #hqBanner .in{display:flex;align-items:center;gap:8px;padding:10px 14px}
+  #hqBanner b{color:var(--accent)}
+  #hqBanner button{margin-left:auto;background:none;border:1px solid var(--border);color:var(--muted);
+    border-radius:6px;font-size:11.5px;padding:4px 9px}
+  #skel{position:absolute;inset:0;display:none;align-items:center;justify-content:center;z-index:15;
+    background:#08090b}
+  #skel.on{display:flex}
+  #skel .col{display:flex;flex-direction:column;gap:12px;width:min(480px,70%)}
+  .skblock{border-radius:8px;background:#14181c;position:relative;overflow:hidden}
+  .skblock::after{content:"";position:absolute;inset:0;
+    background:linear-gradient(100deg,transparent 30%,rgba(255,255,255,.09) 50%,transparent 70%);
+    animation:shimmer 1.3s infinite}
+  .toast.err{border-left-color:var(--danger)}
+  /* svg icons */
+  .tool .ic{display:flex;justify-content:center;width:22px}
+  .tool .ic svg{width:16px;height:16px}
+  #mobileNav .ic{display:flex}
+  #mobileNav .ic svg{width:18px;height:18px}
+  .choice .e{display:flex;justify-content:center;margin-bottom:8px;color:var(--muted)}
+  .choice.on .e{color:var(--accent)}
+  .choice .e svg{width:22px;height:22px}
+  .minicheck{width:22px;height:22px;border-radius:6px;border:1px solid #3a434d;
+    background-image:conic-gradient(#3a434d 0 25%,#232a31 0 50%,#3a434d 0 75%,#232a31 0);
+    background-size:8px 8px}
+  /* de-slop: subtler hero, calmer hover */
+  #view-landing{background:radial-gradient(900px 480px at 50% 18%,rgba(52,211,153,.04),transparent 70%)}
+  .dropzone:hover,.dropzone.drag{box-shadow:0 0 0 4px rgba(52,211,153,.07),0 14px 34px rgba(0,0,0,.45)}
+
+  /* mobile nav */
+  #mobileNav{display:none}
+  @media (max-width:920px){
+    .rail{display:none}
+    .ctx{position:fixed;left:0;right:0;bottom:56px;top:auto;width:auto;max-height:44vh;
+      border-left:0;border-top:1px solid var(--border);border-radius:16px 16px 0 0;
+      box-shadow:0 -14px 40px rgba(0,0,0,.55)}
+    #fb{right:12px;left:12px;width:auto;bottom:auto;top:60px}
+    #mobileNav{display:flex;flex:0 0 56px;background:var(--bg2);border-top:1px solid var(--border);
+      z-index:35}
+    #mobileNav button{flex:1;background:none;border:0;color:var(--muted);font-size:10px;font-weight:700;
+      display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
+      letter-spacing:.02em}
+    #mobileNav button .ic{font-size:17px}
+    #mobileNav button.on{color:var(--accent)}
+    .statusbar .hideM{display:none}
+    .topbar .hideM{display:none}
+  }
+</style>
+</head>
+<body>
+
+<!-- ============ LANDING ============ -->
+<section class="view on" id="view-landing">
+  <div class="brand">RM<span>BG</span></div>
+  <div class="hero-title">Remove backgrounds. Keep the subject.</div>
+  <div class="hero-sub">Free · Open-source · Runs on your device — no account, no credits</div>
+
+  <div class="dropzone" id="dropzone" role="button" tabindex="0" aria-label="Drop image or choose a file">
+    <div class="big" id="dzTitle">Drop image here</div>
+    <div class="small">or <u>click to choose a file</u> · paste from clipboard works too <span style="font-family:var(--mono);font-size:11px">(Ctrl+V)</span></div>
+    <div class="formats">PNG · JPG · WebP · AVIF · BMP</div>
+    <input type="file" id="fileInput" accept="image/*" hidden />
+  </div>
+
+  <div class="landing-row">
+    <button class="btn primary" id="btnChoose">Choose image</button>
+    <button class="btn ghost" id="btnSample">Try a sample</button>
+    <button class="btn ghost" id="btnBatch">Batch images</button>
+  </div>
+
+  <div class="trust">
+    <span class="pill"><span class="dot"></span>Processing locally</span>
+    <span class="pill">Original resolution export</span>
+    <span class="pill">No watermark</span>
+    <span class="mocktag">mock · nothing is processed</span>
+  </div>
+
+  <div class="example">
+    <figure>
+      <div class="img" style="background:linear-gradient(135deg,#3b4a5a,#1c232b)">
+        <svg width="120" height="120" viewBox="0 0 120 120"><circle cx="60" cy="42" r="20" fill="#c8cfd5"/><rect x="34" y="66" width="52" height="44" rx="14" fill="#c8cfd5"/></svg>
+      </div>
+      <figcaption>BEFORE</figcaption>
+    </figure>
+    <figure>
+      <div class="img" style="background:conic-gradient(#22282e 0 25%,#161b20 0 50%,#22282e 0 75%,#161b20 0);background-size:18px 18px">
+        <svg width="120" height="120" viewBox="0 0 120 120"><circle cx="60" cy="42" r="20" fill="#e9edf0"/><rect x="34" y="66" width="52" height="44" rx="14" fill="#e9edf0"/></svg>
+      </div>
+      <figcaption>AFTER</figcaption>
+    </figure>
+  </div>
+
+  <div class="checklist">
+    <span><b>✓</b>Hair &amp; fine details</span>
+    <span><b>✓</b>Transparent PNG</span>
+    <span><b>✓</b>Manual refinement</span>
+    <span><b>✓</b>Full-resolution export</span>
+    <span><b>✓</b>Runs locally</span>
+  </div>
+</section>
+
+<!-- ============ PREPARING ============ -->
+<section class="view" id="view-preparing">
+  <div class="prep-card">
+    <div class="ring" id="prepRing"></div>
+    <h2 id="prepTitle">Preparing local AI…</h2>
+    <p>Your browser is downloading the local AI model.<br/>This happens once — afterwards it is cached on this device.<br/><b style="color:var(--text)">Your image stays on this device.</b></p>
+    <div class="progress shimmer"><i id="prepBar"></i></div>
+    <div class="mbline"><b id="prepMB">0 MB</b> / 120 MB · <span id="prepPct">0%</span></div>
+    <p class="tip" style="text-align:center">Fast preview model first, high-quality model refines in the background once cached.</p>
+    <div class="row" style="margin-top:18px">
+      <button class="btn ghost" id="btnPrepCancel">Back</button>
+      <button class="btn primary" id="btnPrepSkip">Skip wait (mock)</button>
+    </div>
+  </div>
+</section>
+
+<!-- ============ EDITOR ============ -->
+<section class="view" id="view-editor">
+  <div class="topbar">
+    <div class="logo">RM<span>BG</span></div>
+    <button class="iconbtn" id="btnBack" title="Back to landing">← <span class="hideM">Back</span></button>
+    <div class="sep"></div>
+    <button class="iconbtn" id="btnUndo" title="Undo (Ctrl+Z)">↩ <span class="hideM">Undo</span></button>
+    <button class="iconbtn" id="btnRedo" title="Redo (Ctrl+Shift+Z)">↪ <span class="hideM">Redo</span></button>
+    <span class="mocktag hideM">mock · no AI wired</span>
+    <div class="spacer"></div>
+    <button class="btn small ghost hideM" id="btnSaveState">Save state</button>
+    <button class="btn small primary" id="btnExport">Export ↓</button>
+  </div>
+
+  <div class="work">
+    <nav class="rail" aria-label="Workflow">
+      <div class="cap">WORKFLOW</div>
+      <button class="tool hero on" data-tool="remove"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg></span>Remove<span class="kbd">1</span></button>
+      <button class="tool" data-tool="refine"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg></span>Refine<span class="kbd">2</span></button>
+      <button class="tool" data-tool="background"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg></span>Background<span class="kbd">3</span></button>
+      <button class="tool" data-tool="effects"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.7l5.66 5.66a8 8 0 1 1-11.31 0z"/></svg></span>Effects<span class="kbd">4</span></button>
+      <button class="tool" data-tool="canvas"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6.13 1L6 16a2 2 0 0 0 2 2h15"/><path d="M1 6.13L16 6a2 2 0 0 1 2 2v15"/></svg></span>Canvas<span class="kbd">5</span></button>
+      <div class="cap" style="margin-top:10px">SESSION</div>
+      <button class="tool" id="btnNewImage"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></span>New image</button>
+    </nav>
+
+    <div class="stage-wrap">
+      <div class="stage" id="stage">
+        <div id="viewport">
+          <div class="checker" id="checker" style="width:520px;height:380px">
+            <svg id="demoSubject" width="520" height="380" viewBox="0 0 520 380">
+              <defs><linearGradient id="g1" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0" stop-color="#e7ecf1"/><stop offset="1" stop-color="#a7b0b9"/>
+              </linearGradient></defs>
+              <ellipse cx="260" cy="334" rx="116" ry="16" fill="rgba(0,0,0,.38)"/>
+              <rect x="231" y="78" width="58" height="44" rx="9" fill="#878f97"/>
+              <rect x="231" y="78" width="58" height="12" rx="6" fill="#9aa2ab"/>
+              <rect x="241" y="116" width="38" height="44" fill="url(#g1)"/>
+              <rect x="205" y="150" width="110" height="182" rx="28" fill="url(#g1)"/>
+              <rect x="205" y="220" width="110" height="58" fill="#323b44"/>
+              <rect x="205" y="231" width="110" height="5" fill="#34d399" opacity=".9"/>
+              <rect x="219" y="250" width="62" height="7" rx="3.5" fill="#7b838b"/>
+              <rect x="219" y="168" width="13" height="146" rx="6.5" fill="#ffffff" opacity=".35"/>
+            </svg>
+            <div id="maskView" style="display:none;position:absolute;inset:0;background:#000;align-items:center;justify-content:center">
+              <svg width="70%" height="70%" viewBox="0 0 520 380" preserveAspectRatio="xMidYMid meet"><rect width="520" height="380" fill="#000"/><rect x="231" y="78" width="58" height="44" rx="9" fill="#fff"/><rect x="241" y="116" width="38" height="44" fill="#fff"/><rect x="205" y="150" width="110" height="182" rx="28" fill="#fff"/><rect x="205" y="220" width="110" height="58" fill="#777"/></svg>
+            </div>
+            <img id="uploadedImg" alt="" style="display:none;position:absolute;inset:0;width:100%;height:100%;object-fit:cover"/>
+            <canvas id="paintLayer"></canvas>
+          </div>
+          </div>
+          <div id="brushRing"><span class="dotc"></span></div>
+          <div id="splitUI">
+            <div class="half" id="splitL" style="left:0;top:0;bottom:0;width:100%;background:linear-gradient(135deg,#3b4a5a,#1c232b);display:flex;align-items:center;justify-content:center">
+              <span class="tag" style="left:10px">ORIGINAL</span>
+              <svg width="300" height="220" viewBox="0 0 520 380"><rect x="231" y="78" width="58" height="44" rx="9" fill="#aeb6bd"/><rect x="241" y="116" width="38" height="44" fill="#c8cfd5"/><rect x="205" y="150" width="110" height="182" rx="28" fill="#c8cfd5"/><rect x="205" y="220" width="110" height="58" fill="#5b636c"/></svg>
+            </div>
+            <div class="half" id="splitR" style="right:0;top:0;bottom:0;width:100%;display:flex;align-items:center;justify-content:center">
+              <span class="tag" style="right:10px">CUTOUT</span>
+              <svg width="300" height="220" viewBox="0 0 520 380"><ellipse cx="260" cy="334" rx="116" ry="16" fill="rgba(0,0,0,.4)"/><rect x="231" y="78" width="58" height="44" rx="9" fill="#878f97"/><rect x="241" y="116" width="38" height="44" fill="#dfe5ea"/><rect x="205" y="150" width="110" height="182" rx="28" fill="#dfe5ea"/><rect x="205" y="220" width="110" height="58" fill="#323b44"/></svg>
+            </div>
+            <div id="splitDiv" style="left:50%"></div>
+          </div>
+          <div class="scan" id="scan"><div class="halo"></div><div class="lbl" id="scanLbl">Detecting subject…</div></div>
+          <div id="skel"><div class="col">
+            <div class="skblock" style="height:26px;width:45%"></div>
+            <div class="skblock" style="height:220px"></div>
+            <div class="skblock" style="height:18px;width:70%"></div>
+          </div></div>
+        </div>
+        <div id="hqBanner"><div class="in"><b>✓</b><span>Enhanced to high-quality mask</span><button id="btnKeepFast">Keep fast</button></div></div>
+        <div class="statusbar">
+          <button class="iconbtn" id="zoomOut" title="Zoom out">−</button>
+          <span id="zoomLbl" style="font-family:var(--mono);min-width:46px;text-align:center">100%</span>
+          <button class="iconbtn" id="zoomIn" title="Zoom in">＋</button>
+          <button class="iconbtn" id="zoomFit">Fit</button>
+          <span class="hideM" style="color:var(--faint)">|</span>
+          <div class="seg" role="group" aria-label="Compare mode">
+            <button data-view="after" class="on">Cutout</button>
+            <button data-view="before">Original</button>
+            <button data-view="split">Split</button>
+            <button data-view="mask">Mask</button>
+          </div>
+          <button class="iconbtn hideM" id="btnOverlay" title="Toggle overlay">Overlay</button>
+          <div class="spacer"></div>
+          <span class="hideM" id="dimLbl" style="font-family:var(--mono)">4032 × 3024</span>
+          <button id="localBtn"><span class="dot"></span>Local processing</button>
+        </div>
+      </div>
+
+      <aside class="ctx" id="ctxPanel">
+        <div class="panel on" id="p-remove">
+          <h3>REMOVE</h3>
+          <div class="card">
+            <div class="okline"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>Background removed</div>
+            <p class="desc" style="margin-top:6px">Subject detected · confidence <b style="color:var(--text)">98%</b> (mock)</p>
+            <div class="row" style="margin-top:10px"><button class="btn small" id="btnRecompute">Recompute</button></div>
+          </div>
+          <div class="card">
+            <h4>AI mode</h4>
+            <div class="radio on" data-ai="hq"><span class="r"></span>High quality</div>
+            <div class="radio" data-ai="fast"><span class="r"></span>Fast<span style="color:var(--faint);font-size:11.5px">· instant preview</span></div>
+          </div>
+          <div class="card">
+            <h4>Detection</h4>
+            <div class="radio on"><span class="r"></span>Auto</div>
+            <div class="radio"><span class="r"></span>Person</div>
+            <div class="radio"><span class="r"></span>Product</div>
+          </div>
+          <p class="tip"><b>Space + drag</b> pans · <b>wheel</b> zooms · <b>B</b> toggles before/after.</p>
+        </div>
+
+        <div class="panel" id="p-refine">
+          <h3>REFINE</h3>
+          <div class="card">
+            <h4>What do you want to change?</h4>
+            <div class="choice2">
+              <button class="choice on" data-br="erase"><span class="e"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="8" stroke-dasharray="3 2"/></svg></span><span class="t">Erase</span></button>
+              <button class="choice" data-br="restore"><span class="e"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></span><span class="t">Restore</span></button>
+              <button class="choice" data-br="guided"><span class="e"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="8"/><line x1="12" y1="4" x2="12" y2="7"/><line x1="12" y1="17" x2="12" y2="20"/><line x1="4" y1="12" x2="7" y2="12"/><line x1="17" y1="12" x2="20" y2="12"/></svg></span><span class="t">Guided</span></button>
+              <button class="choice" data-br="recompute"><span class="e"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg></span><span class="t">Recompute</span></button>
+            </div>
+          </div>
+          <div class="card" id="brushCard">
+            <h4 id="brushTitle">Erase brush</h4>
+            <div class="slider-row"><label>Brush size <b id="brushSizeV">48px</b></label><input type="range" id="brushSize" min="4" max="160" value="48"></div>
+            <div class="slider-row"><label>Softness <b id="brushSoftV">40%</b></label><input type="range" id="brushSoft" min="0" max="100" value="40"></div>
+            <button class="mini" id="btnShowMask">Show mask</button>
+            <button class="mini" id="btnShowOrig">Show original</button>
+          </div>
+          <div class="card hidden" id="guidedCard">
+            <h4>Guided selection</h4>
+            <p class="desc">Click an area — RMBG finds the boundary.</p>
+            <div class="choice2" style="margin-top:10px">
+              <button class="choice on" data-g="erase"><span class="e"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="8"/><line x1="12" y1="4" x2="12" y2="7"/><line x1="12" y1="17" x2="12" y2="20"/><line x1="4" y1="12" x2="7" y2="12"/><line x1="17" y1="12" x2="20" y2="12"/></svg></span><span class="t">Guided Erase</span></button>
+              <button class="choice" data-g="restore"><span class="e"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg></span><span class="t">Guided Restore</span></button>
+            </div>
+          </div>
+          <div class="card hidden" id="recompCard">
+            <h4>Recompute region</h4>
+            <p class="desc">Mark the problem area — the AI re-runs there only.</p>
+            <div class="row" style="margin-top:10px"><button class="btn small primary" id="btnRecompGo">Recompute selection</button></div>
+            <p class="tip">Outside the region the mask is untouched.</p>
+          </div>
+        </div>
+        <div class="panel" id="p-background">
+          <h3>BACKGROUND</h3>
+          <div class="card">
+            <div class="choice2" style="grid-template-columns:1fr 1fr 1fr">
+              <button class="choice on" data-bg="transparent"><span class="e"><span class="minicheck"></span></span><span class="t">Transp.</span></button>
+              <button class="choice" data-bg="color"><span class="e"><svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><circle cx="12" cy="12" r="8"/></svg></span><span class="t">Color</span></button>
+              <button class="choice" data-bg="image"><span class="e"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg></span><span class="t">Image</span></button>
+            </div>
+            <div id="bgColorBox" class="hidden">
+              <div class="colorline"><input type="color" id="bgColor" value="#ffffff"><code id="bgHex">#FFFFFF</code></div>
+              <div class="swatches">
+                <span class="sw on" data-c="#ffffff" style="background:#fff"></span>
+                <span class="sw" data-c="#0b0d0f" style="background:#0b0d0f;border-color:#3a434d"></span>
+                <span class="sw" data-c="#e11d48" style="background:#e11d48"></span>
+                <span class="sw" data-c="#2563eb" style="background:#2563eb"></span>
+                <span class="sw" data-c="#16a34a" style="background:#16a34a"></span>
+              </div>
+            </div>
+            <div id="bgImageBox" class="hidden">
+              <button class="mini" id="btnBgUpload">Upload background</button>
+              <p class="tip">…or drop an image anywhere on the canvas.</p>
+            </div>
+          </div>
+          <div class="card hidden" id="subjectCard">
+            <h4>Subject</h4>
+            <div class="slider-row"><label>Scale <b id="subScaleV">100%</b></label><input type="range" id="subScale" min="20" max="200" value="100"></div>
+            <div class="slider-row"><label>Rotation <b id="subRotV">0°</b></label><input type="range" id="subRot" min="-45" max="45" value="0"></div>
+            <div class="row" style="margin-top:10px"><button class="btn small ghost" id="btnSubReset">Reset</button></div>
+          </div>
+          <div class="card hidden" id="jpegWarn">
+            <h4 style="color:var(--warn)">JPEG has no transparency</h4>
+            <p class="desc">Pick a background before JPEG export — nothing is flattened silently.</p>
+          </div>
+        </div>
+
+        <div class="panel" id="p-effects">
+          <h3>EFFECTS</h3>
+          <div class="card">
+            <h4>Shadow</h4>
+            <div class="radio on" data-sh="off"><span class="r"></span>Off</div>
+            <div class="radio" data-sh="on"><span class="r"></span>On</div>
+            <div id="shadowCtrls" class="hidden">
+              <div class="slider-row"><label>Opacity <b id="shOpV">40%</b></label><input type="range" id="shOp" min="0" max="100" value="40"></div>
+              <div class="slider-row"><label>Blur <b id="shBlurV">18px</b></label><input type="range" id="shBlur" min="0" max="60" value="18"></div>
+              <div class="slider-row"><label>Distance <b id="shDistV">12px</b></label><input type="range" id="shDist" min="0" max="60" value="12"></div>
+            </div>
+          </div>
+          <div class="card">
+            <h4>Edge</h4>
+            <div class="slider-row"><label>Feather <b id="featherV">1px</b></label><input type="range" id="feather" min="0" max="10" value="1"></div>
+            <div class="slider-row"><label>Defringe <b id="defringeV">0</b></label><input type="range" id="defringe" min="0" max="10" value="0"></div>
+          </div>
+        </div>
+
+        <div class="panel" id="p-canvas">
+          <h3>CANVAS</h3>
+          <div class="card">
+            <h4>Output size</h4>
+            <div class="radio on"><span class="r"></span>Original<span style="color:var(--faint);font-size:11.5px;font-family:var(--mono)">· 4032 × 3024</span></div>
+            <div class="radio"><span class="r"></span>Custom…</div>
+          </div>
+          <div class="card">
+            <h4>Checkerboard</h4>
+            <div class="slider-row"><label>Cell size <b id="cellV">16px</b></label><input type="range" id="cellSize" min="10" max="40" value="16"></div>
+          </div>
+          <p class="tip">Canvas controls affect framing and preview only — never the stored mask.</p>
+        </div>
+      </aside>
+    </div>
+
+    <nav id="mobileNav">
+      <button class="on" data-tool="remove"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg></span>Remove</button>
+      <button data-tool="refine"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg></span>Refine</button>
+      <button data-tool="background"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg></span>Backgrnd</button>
+      <button data-tool="effects"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.7l5.66 5.66a8 8 0 1 1-11.31 0z"/></svg></span>Effects</button>
+      <button data-tool="canvas"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6.13 1L6 16a2 2 0 0 0 2 2h15"/><path d="M1 6.13L16 6a2 2 0 0 1 2 2v15"/></svg></span>Canvas</button>
+    </nav>
+</section>
+
+<section class="view" id="view-batch">
+  <div class="batch-head">
+    <button class="iconbtn" data-goto="landing">←</button>
+    <h2>Batch</h2>
+    <span class="pill">12 images · sequential queue (mock)</span>
+    <span class="mocktag">mock</span>
+    <div class="spacer" style="flex:1"></div>
+    <button class="btn small" id="btnBatchAdd">Add images</button>
+    <button class="btn small primary" id="btnBatchExport">Export all</button>
+  </div>
+  <div style="padding:10px 22px 0;color:var(--muted);font-size:12.5px">Processed: <b style="color:var(--text)" id="batchCount">8 / 12</b></div>
+  <div class="batch-grid" id="batchGrid"></div>
+</section>
+
+<div id="exportWrap">
+  <div class="scrim" data-close-export></div>
+  <div id="exportDrawer">
+    <button class="iconbtn x" data-close-export>✕</button>
+    <h2>Export</h2>
+    <p class="tip">Settings, not just a download link.</p>
+    <div class="cap2">FORMAT</div>
+    <div class="fmtgrid">
+      <button class="fmt on" data-fmt="PNG">PNG</button>
+      <button class="fmt" data-fmt="WebP">WebP</button>
+      <button class="fmt" data-fmt="JPEG">JPEG</button>
+      <button class="fmt" data-fmt="AVIF">AVIF</button>
+    </div>
+    <div class="cap2">RESOLUTION</div>
+    <div class="radio on"><span class="r"></span>Original</div>
+    <div class="dims" id="expDims">4032 × 3024 · PNG · transparent</div>
+    <div class="radio"><span class="r"></span>Custom…</div>
+    <div class="cap2">BACKGROUND</div>
+    <div class="radio on"><span class="r"></span>Transparent</div>
+    <div class="radio"><span class="r"></span>Current background</div>
+    <div class="progress hidden" id="expProgWrap" style="margin-top:16px"><i id="expBar"></i></div>
+    <div class="row" style="margin-top:16px"><button class="btn primary" id="btnDoExport">Export PNG</button></div>
+    <p class="tip" id="expNote">Mock — writes nothing.</p>
+  </div>
+</div>
+
+<div id="statesWrap">
+  <div class="scrim" data-close-states></div>
+  <div id="statesDrawer">
+    <button class="iconbtn x" data-close-states>✕</button>
+    <h2>Preview loading states</h2>
+    <p class="tip">Mock only — each button plays the real animation with fake timing. Nothing is processed.</p>
+    <div class="cap2">DOWNLOAD</div>
+    <button class="mini" data-state="download">Model download (0 → 120 MB)</button>
+    <button class="mini" data-state="hq">Fast → high-quality upgrade</button>
+    <div class="cap2">PROCESSING</div>
+    <button class="mini" data-state="scan">Segmentation scan halo</button>
+    <button class="mini" data-state="recompute">Region recompute</button>
+    <button class="mini" data-state="skeleton">Skeleton shimmer</button>
+    <div class="cap2">EXPORT &amp; BATCH</div>
+    <button class="mini" data-state="export">Export progress → done</button>
+    <button class="mini" data-state="batch">Batch queue progress</button>
+    <div class="cap2">FEEDBACK</div>
+    <button class="mini" data-state="toasts">Success + info toasts</button>
+    <button class="mini" data-state="error">Error message</button>
+    <div class="row" style="margin-top:14px"><button class="btn primary" id="btnPlayAll">Play all</button></div>
+  </div>
+</div>
+
+<div id="localPop">
+  <h4>LOCAL PROCESSING</h4>
+  <p>Your image is processed on this device. Images are not uploaded to an RMBG server. The AI model was downloaded separately and is stored in this browser's cache. <span style="color:var(--faint)">(Mock copy.)</span></p>
+</div>
+
+<div id="fb">
+  <p>How does the cutout look?</p>
+  <div class="row">
+    <button class="btn small ghost" id="fbFine">Fine</button>
+    <button class="btn small ghost" id="fbFix">Needs fixing</button>
+  </div>
+</div>
+
+<div id="toasts"></div>
+<script>
+"use strict";
+const $=s=>document.querySelector(s), $$=s=>Array.from(document.querySelectorAll(s));
+const MOCK=" (mock — nothing processed)";
+
+/* toasts */
+function toast(msg,err){
+  const t=document.createElement("div");
+  t.className="toast"+(err?" err":""); t.textContent=msg;
+  $("#toasts").appendChild(t);
+  setTimeout(()=>{t.classList.add("out"); setTimeout(()=>t.remove(),350)},2600);
+}
+
+/* view router */
+const views=["view-landing","view-preparing","view-editor","view-batch"];
+function showView(id){
+  views.forEach(v=>$("#"+v).classList.toggle("on",v===id));
+  try{
+    document.querySelector("#exportWrap").classList.remove("on");
+    document.querySelector("#statesWrap").classList.remove("on");
+    document.querySelector("#localPop").classList.remove("on");
+    document.querySelector("#fb").classList.remove("on");
+  }catch(_){}
+  if(id==="view-editor") requestAnimationFrame(()=>{sizePaint();fitZoom(false)});
+}
+
+/* undo/redo mock stacks */
+let undoStack=[], redoStack=[];
+function pushHist(label){undoStack.push(label); if(undoStack.length>40)undoStack.shift(); redoStack=[]; syncHist();}
+function syncHist(){$("#btnUndo").disabled=!undoStack.length; $("#btnRedo").disabled=!redoStack.length;}
+$("#btnUndo").onclick=()=>{if(!undoStack.length)return; redoStack.push(undoStack.pop()); syncHist(); toast("Undone");};
+$("#btnRedo").onclick=()=>{if(!redoStack.length)return; undoStack.push(redoStack.pop()); syncHist(); toast("Redone");};
+syncHist();
+
+/* landing */
+const dz=$("#dropzone"), fi=$("#fileInput");
+$("#btnChoose").onclick=()=>fi.click();
+dz.onclick=e=>{if(e.target!==fi)fi.click();};
+dz.onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();fi.click();}};
+["dragover","dragenter"].forEach(ev=>dz.addEventListener(ev,e=>{e.preventDefault();dz.classList.add("drag");}));
+["dragleave","drop"].forEach(ev=>dz.addEventListener(ev,e=>{e.preventDefault();dz.classList.remove("drag");}));
+dz.addEventListener("drop",e=>{
+  const f=e.dataTransfer.files&&e.dataTransfer.files[0];
+  if(f) loadFile(f); else startPreparing(true);
+});
+fi.onchange=()=>{if(fi.files[0])loadFile(fi.files[0]);};
+document.addEventListener("paste",e=>{
+  if(!$("#view-landing").classList.contains("on"))return;
+  const item=Array.from(e.clipboardData.items||[]).find(i=>i.type.startsWith("image/"));
+  if(item)loadFile(item.getAsFile());
+});
+$("#btnSample").onclick=()=>startPreparing(true);
+$("#btnBatch").onclick=()=>{showView("view-batch");renderBatch();};
+
+/* ingest (preview only) */
+let uploadedURL=null;
+function loadFile(f){
+  if(!f.type.startsWith("image/")){toast("Not an image file",true);return;}
+  if(uploadedURL)URL.revokeObjectURL(uploadedURL);
+  uploadedURL=URL.createObjectURL(f);
+  const img=$("#uploadedImg");
+  img.onload=()=>{
+    $("#dimLbl").textContent=img.naturalWidth+" × "+img.naturalHeight;
+    $("#expDims").textContent=img.naturalWidth+" × "+img.naturalHeight+" · PNG · transparent";
+    img.style.display="block"; $("#demoSubject").style.display="none";
+    startPreparing(false);
+  };
+  img.src=uploadedURL;
+}
+
+/* preparing */
+let prepTimer=null;
+function startPreparing(withDemo){
+  showView("view-preparing");
+  const bar=$("#prepBar"), mb=$("#prepMB"), pct=$("#prepPct");
+  let v=0; clearInterval(prepTimer);
+  $("#prepRing").style.display="block"; $("#prepTitle").textContent="Preparing local AI…";
+  prepTimer=setInterval(()=>{
+    v=Math.min(120,v+Math.random()*9+3);
+    bar.style.width=(v/120*100)+"%";
+    mb.textContent=Math.floor(v)+" MB"; pct.textContent=Math.floor(v/120*100)+"%";
+    if(v>=120){clearInterval(prepTimer); finishPreparing();}
+  },140);
+}
+function finishPreparing(){
+  $("#prepTitle").textContent="Ready — local model cached";
+  setTimeout(()=>{showView("view-editor"); runScan("Detecting subject…"); setTimeout(()=>$("#fb").classList.add("on"),3200);},450);
+}
+$("#btnPrepCancel").onclick=()=>{clearInterval(prepTimer);showView("view-landing");};
+$("#btnPrepSkip").onclick=()=>{clearInterval(prepTimer);finishPreparing();};
+
+/* tool switching */
+function setTool(name){
+  $$(".tool[data-tool]").forEach(b=>b.classList.toggle("on",b.dataset.tool===name));
+  $$("#mobileNav button").forEach(b=>b.classList.toggle("on",b.dataset.tool===name));
+  $$(".ctx .panel").forEach(p=>p.classList.toggle("on",p.id==="p-"+name));
+  brushMode=(name==="refine"&&subBrush!=="guided"&&subBrush!=="recompute");
+  $("#stage").classList.toggle("brushing",brushMode);
+  if(name!=="refine")hideBrushRing();
+}
+$$("[data-tool]").forEach(b=>b.onclick=()=>setTool(b.dataset.tool));
+$("#btnBack").onclick=()=>showView("view-landing");
+$("#btnNewImage").onclick=()=>showView("view-landing");
+$("#btnSaveState").onclick=()=>{pushHist("save");toast("State saved locally");};
+$$("[data-goto]").forEach(b=>b.onclick=()=>showView("view-"+b.dataset.goto));
+
+/* refine sub-modes */
+let subBrush="erase", brushMode=false;
+$$("[data-br]").forEach(b=>b.onclick=()=>{
+  $$("[data-br]").forEach(x=>x.classList.toggle("on",x===b));
+  subBrush=b.dataset.br;
+  $("#brushCard").classList.toggle("hidden",subBrush==="guided"||subBrush==="recompute");
+  $("#guidedCard").classList.toggle("hidden",subBrush!=="guided");
+  $("#recompCard").classList.toggle("hidden",subBrush!=="recompute");
+  $("#brushTitle").textContent=subBrush==="restore"?"Restore brush":"Erase brush";
+  brushMode=(subBrush==="erase"||subBrush==="restore");
+  $("#stage").classList.toggle("brushing",brushMode);
+  if(!brushMode)hideBrushRing();
+  toast(subBrush==="guided"?"Guided: click an area"+MOCK:subBrush==="recompute"?"Drag a box, then Recompute"+MOCK:(subBrush==="restore"?"Restore brush ready":"Erase brush ready"));
+});
+$$("[data-g]").forEach(b=>b.onclick=()=>{$$("[data-g]").forEach(x=>x.classList.toggle("on",x===b)); pushHist("guided"); toast("Guided region selected"+MOCK);});
+$("#btnRecompGo").onclick=()=>{runScan("Recomputing selection…"); pushHist("recompute");};
+$("#btnRecompute").onclick=()=>{runScan("Recomputing…"); pushHist("recompute");};
+
+/* generic radios + choices */
+$$(".card").forEach(card=>{
+  const radios=card.querySelectorAll(":scope > .radio");
+  radios.forEach(r=>r.onclick=()=>{radios.forEach(x=>x.classList.toggle("on",x===r)); pushHist("param");});
+});
+$$("[data-ai]").forEach(r=>r.onclick=()=>{
+  $$("[data-ai]").forEach(x=>x.classList.toggle("on",x===r));
+  toast(r.dataset.ai==="fast"?"Fast preview mode"+MOCK:"High-quality mode"+MOCK);
+});
+$$("[data-bg]").forEach(b=>b.onclick=()=>{
+  $$("[data-bg]").forEach(x=>x.classList.toggle("on",x===b));
+  const v=b.dataset.bg;
+  $("#bgColorBox").classList.toggle("hidden",v!=="color");
+  $("#bgImageBox").classList.toggle("hidden",v!=="image");
+  $("#subjectCard").classList.toggle("hidden",v==="transparent");
+  $("#checker").style.background=v==="color"?$("#bgColor").value:"";
+  $("#checker").style.backgroundSize=v==="color"?"auto":"";
+  pushHist("background");
+});
+$("#bgColor").oninput=e=>{$("#bgHex").textContent=e.target.value.toUpperCase(); $("#checker").style.background=e.target.value;};
+$$(".sw").forEach(s=>s.onclick=()=>{
+  $$(".sw").forEach(x=>x.classList.toggle("on",x===s));
+  $("#bgColor").value=s.dataset.c; $("#bgHex").textContent=s.dataset.c.toUpperCase();
+  $("#checker").style.background=s.dataset.c; pushHist("bgcolor");
+});
+$("#btnBgUpload").onclick=()=>toast("Background upload"+MOCK);
+$$("[data-sh]").forEach(r=>r.onclick=()=>{
+  $$("[data-sh]").forEach(x=>x.classList.toggle("on",x===r));
+  $("#shadowCtrls").classList.toggle("hidden",r.dataset.sh!=="on"); pushHist("shadow");
+});
+$("#btnShowMask").onclick=()=>setCompare("mask");
+$("#btnShowOrig").onclick=()=>setCompare("before");
+$("#btnSubReset").onclick=()=>{$("#subScale").value=100;$("#subRot").value=0;updSub();toast("Subject transform reset");};
+
+/* sliders */
+function bindSlider(id,vid,fmt){
+  const el=$("#"+id);
+  el.oninput=()=>{$("#"+vid).textContent=fmt(el.value);};
+  el.onchange=()=>pushHist(id);
+}
+bindSlider("brushSize","brushSizeV",v=>v+"px");
+bindSlider("brushSoft","brushSoftV",v=>v+"%");
+bindSlider("subScale","subScaleV",v=>v+"%");
+bindSlider("subRot","subRotV",v=>v+"°");
+bindSlider("shOp","shOpV",v=>v+"%");
+bindSlider("shBlur","shBlurV",v=>v+"px");
+bindSlider("shDist","shDistV",v=>v+"px");
+bindSlider("feather","featherV",v=>v+"px");
+bindSlider("defringe","defringeV",v=>v);
+$("#cellSize").oninput=e=>{$("#cellV").textContent=e.target.value+"px"; $("#checker").style.backgroundSize=e.target.value+"px "+e.target.value+"px";};
+function updSub(){$("#subScaleV").textContent=$("#subScale").value+"%";$("#subRotV").textContent=$("#subRot").value+"°";}
+/* canvas zoom / pan */
+const stage=$("#stage"), viewport=$("#viewport"), checker=$("#checker");
+let zoom=1, panX=0, panY=0, panning=false, spaceDown=false, sx=0, sy=0, ox=0, oy=0;
+function applyT(){viewport.style.transform=`translate(calc(-50% + ${panX}px), calc(-50% + ${panY}px)) scale(${zoom})`;}
+function fitZoom(announce){
+  const r=stage.getBoundingClientRect();
+  zoom=Math.min((r.width-60)/checker.offsetWidth,(r.height-60)/checker.offsetHeight,1.5);
+  zoom=Math.max(.1,zoom); panX=0; panY=0; applyT();
+  $("#zoomLbl").textContent=Math.round(zoom*100)+"%";
+  if(announce)toast("Fit");
+}
+function setZoom(z){zoom=Math.min(4,Math.max(.1,z)); applyT(); $("#zoomLbl").textContent=Math.round(zoom*100)+"%";}
+$("#zoomIn").onclick=()=>setZoom(zoom*1.2);
+$("#zoomOut").onclick=()=>setZoom(zoom/1.2);
+$("#zoomFit").onclick=()=>fitZoom(true);
+stage.addEventListener("wheel",e=>{e.preventDefault(); setZoom(zoom*(e.deltaY<0?1.1:0.9));},{passive:false});
+stage.addEventListener("pointerdown",e=>{
+  if(brushMode&&e.button===0&&!spaceDown){paintDot(e); paintMove(e); return;}
+  if(e.button===1||spaceDown||!brushMode){panning=true;sx=e.clientX;sy=e.clientY;ox=panX;oy=panY;stage.classList.add("panning");stage.setPointerCapture(e.pointerId);}
+});
+stage.addEventListener("pointermove",e=>{
+  moveRing(e);
+  if(panning){panX=ox+(e.clientX-sx);panY=oy+(e.clientY-sy);applyT();}
+  else if(brushMode&&e.buttons===1&&!spaceDown)paintDot(e);
+});
+stage.addEventListener("pointerup",()=>{panning=false;stage.classList.remove("panning");});
+stage.addEventListener("dblclick",()=>fitZoom(true));
+document.addEventListener("keydown",e=>{if(e.code==="Space"&&$("#view-editor").classList.contains("on")){spaceDown=true;e.preventDefault();}});
+document.addEventListener("keyup",e=>{if(e.code==="Space")spaceDown=false;});
+
+/* compare modes */
+let compareMode="after";
+function setCompare(m){
+  compareMode=m;
+  $$(".seg button").forEach(b=>b.classList.toggle("on",b.dataset.view===m));
+  $("#splitUI").classList.toggle("on",m==="split");
+  const isMask=m==="mask";
+  $("#maskView").style.display=isMask?"flex":"none";
+  $("#demoSubject").style.display=(isMask||$("#uploadedImg").style.display==="block"&&isMask)?"none":($("#uploadedImg").style.display==="block"?"none":"block");
+  if(m==="before")toast("Original pixels — never destroyed");
+  if(m==="mask")toast("Mask: white kept · black removed · gray partial");
+}
+$$(".seg button").forEach(b=>b.onclick=()=>setCompare(b.dataset.view));
+$("#btnOverlay").onclick=e=>{e.currentTarget.classList.toggle("active"); toast("Overlay "+($("#btnOverlay").classList.contains("active")?"on":"off"));};
+/* split drag */
+(()=>{const div=$("#splitDiv"),ui=$("#splitUI");let drag=false;
+div.addEventListener("pointerdown",e=>{drag=true;div.setPointerCapture(e.pointerId);});
+div.addEventListener("pointermove",e=>{
+  if(!drag)return;
+  const r=checker.getBoundingClientRect();
+  let p=(e.clientX-r.left)/r.width*100; p=Math.max(2,Math.min(98,p));
+  div.style.left=p+"%"; $("#splitR").style.clipPath=`inset(0 0 0 ${p}%)`;
+});
+div.addEventListener("pointerup",()=>drag=false);
+$("#splitR").style.clipPath="inset(0 0 0 50%)";})();
+
+/* brush paint (visual mock) */
+const paint=$("#paintLayer"), pctx=paint.getContext("2d"), ring=$("#brushRing");
+function sizePaint(){paint.width=checker.offsetWidth;paint.height=checker.offsetHeight;}
+function brushColor(){return subBrush==="restore"?"52,211,153":"248,113,113";}
+function paintDot(e){
+  const r=checker.getBoundingClientRect();
+  const x=(e.clientX-r.left)/r.width*paint.width, y=(e.clientY-r.top)/r.height*paint.height;
+  const s=+$("#brushSize").value/2, soft=+$("#brushSoft").value/100;
+  const g=pctx.createRadialGradient(x,y,s*(1-soft)*.5,x,y,s);
+  g.addColorStop(0,`rgba(${brushColor()},.5)`);g.addColorStop(1,`rgba(${brushColor()},0)`);
+  pctx.fillStyle=g;pctx.beginPath();pctx.arc(x,y,s,0,7);pctx.fill();
+  pushHist("stroke");
+}
+function paintMove(e){/* stroke coalescing is engine-side; mock logs per stroke */}
+function moveRing(e){
+  if(!brushMode||spaceDown){ring.style.display="none";return;}
+  const s=+$("#brushSize").value*(e.shiftKey?.5:1);
+  ring.style.display="block";ring.style.width=ring.style.height=s+"px";
+  ring.style.left=e.clientX+"px";ring.style.top=e.clientY+"px";
+}
+function hideBrushRing(){ring.style.display="none";}
+function paintMoveAlias(){}
+window.addEventListener("resize",()=>{sizePaint();});
+
+/* scan halo */
+let scanT=null;
+function runScan(label){
+  $("#scanLbl").textContent=label||"Detecting subject…";
+  $("#scan").classList.add("on");
+  clearTimeout(scanT); scanT=setTimeout(()=>$("#scan").classList.remove("on"),2600);
+}
+
+/* local popover */
+const localBtn=$("#localBtn"), localPop=$("#localPop");
+localBtn.onclick=e=>{
+  e.stopPropagation();
+  const r=localBtn.getBoundingClientRect();
+  localPop.style.left=Math.min(r.left,innerWidth-310)+"px";
+  localPop.style.top=(r.top-150)+"px";
+  localPop.classList.toggle("on");
+};
+document.addEventListener("click",e=>{if(!localPop.contains(e.target))localPop.classList.remove("on");});
+
+/* feedback bubble */
+$("#fbFine").onclick=()=>{$("#fb").classList.remove("on");toast("Thanks — kept locally");};
+$("#fbFix").onclick=()=>{$("#fb").classList.remove("on");setTool("refine");toast("Refine tools ready");};
+
+/* export drawer */
+const expWrap=$("#exportWrap");
+$("#btnExport").onclick=()=>expWrap.classList.add("on");
+$$("[data-close-export]").forEach(b=>b.onclick=()=>expWrap.classList.remove("on"));
+$$(".fmt").forEach(b=>b.onclick=()=>{
+  $$(".fmt").forEach(x=>x.classList.toggle("on",x===b));
+  $("#btnDoExport").textContent="Export "+b.dataset.fmt;
+  $("#jpegWarn").classList.toggle("hidden",!(b.dataset.fmt==="JPEG"));
+  if(b.dataset.fmt==="JPEG")toast("JPEG needs a background — pick one");
+});
+function runExport(){
+  const w=$("#expProgWrap"),bar=$("#expBar");
+  w.classList.remove("hidden");let v=0;
+  const t=setInterval(()=>{v=Math.min(100,v+8+Math.random()*10);bar.style.width=v+"%";
+    if(v>=100){clearInterval(t);$("#expNote").textContent="Done: rmbg-export.png · 4032 × 3024 · 4.2 MB (mock)";toast("Export complete");pushHist("export");}},160);
+}
+$("#btnDoExport").onclick=runExport;
+
+/* batch (mock tiles) */
+const batchStates=[["ok","✓"],["ok","✓"],["run","62%"],["run","31%"],["wait","queued"],["wait","queued"],["wait","queued"],["err","failed"],["ok","✓"],["ok","✓"],["wait","queued"],["wait","queued"]];
+function renderBatch(animate){
+  const g=$("#batchGrid");g.innerHTML="";
+  let done=0;
+  batchStates.forEach((s,i)=>{
+    const d=document.createElement("div");d.className="bthumb";
+    d.innerHTML=`<div class="im" style="background:${i%3?"linear-gradient(135deg,#2a3540,#171d23)":"conic-gradient(#22282e 0 25%,#161b20 0 50%,#22282e 0 75%,#161b20 0);background-size:14px 14px"}">
+      <svg width="64" height="64" viewBox="0 0 120 120"><circle cx="60" cy="42" r="20" fill="#c8cfd5"/><rect x="34" y="66" width="52" height="44" rx="14" fill="#c8cfd5"/></svg>
+      <span class="badge ${s[0]}" style="position:absolute;top:8px;left:8px">${s[1]}</span></div>
+      <div class="meta"><span>img-${String(i+1).padStart(2,"0")}.jpg</span><span>${(2+i%5)}.${i%9} MB</span></div>
+      <div class="bar"><i style="width:${s[0]==="ok"?100:s[0]==="run"?parseInt(s[1]):0}%"></i></div>`;
+    d.onclick=()=>{showView("view-editor");toast("Opened in editor"+MOCK);};
+    g.appendChild(d); if(s[0]==="ok")done++;
+  });
+  $("#batchCount").textContent=done+" / "+batchStates.length;
+  if(animate){
+    $$("#batchGrid .bar i").forEach((b,i)=>{b.style.width="0";setTimeout(()=>{b.style.transition="width 1.6s ease";b.style.width=(batchStates[i][0]==="err"?0:100)+"%";},i*120);});
+  }
+}
+$("#btnBatchAdd").onclick=()=>toast("File picker"+MOCK);
+$("#btnBatchExport").onclick=()=>toast("Exporting batch as .zip"+MOCK);
+
+/* states playground */
+const statesWrap=$("#statesWrap");
+function openStates(){statesWrap.classList.add("on");}
+function closeStates(){statesWrap.classList.remove("on");}
+$$("[data-close-states]").forEach(b=>b.onclick=closeStates);
+if(!$("#btnStates")){
+  const b=document.createElement("button");
+  b.className="btn small ghost";b.id="btnStates";b.textContent="States";
+  b.title="Preview every loading state (mock)";
+  b.onclick=openStates;
+  $("#btnExport").before(b);
+}
+const landBtn=document.createElement("button");
+landBtn.className="btn ghost";landBtn.textContent="Preview states";
+landBtn.onclick=()=>{showView("view-editor");openStates();};
+document.querySelector("#view-landing .landing-row").appendChild(landBtn);
+$$("[data-state]").forEach(b=>b.onclick=()=>playState(b.dataset.state));
+function playState(s){
+  closeStates();
+  if(s==="download"){showView("view-preparing");startPreparing(true);}
+  if(s==="hq"){showView("view-editor");$("#hqBanner").classList.add("on");toast("Fast preview shown — HQ refining in background");}
+  if(s==="scan"){showView("view-editor");runScan("Detecting subject…");}
+  if(s==="recompute"){showView("view-editor");toast("Recomputing region…");runScan("Re-evaluating selection…");pushHist("recompute");}
+  if(s==="skeleton"){showView("view-editor");$("#skel").classList.add("on");setTimeout(()=>$("#skel").classList.remove("on"),2000);}
+  if(s==="export"){showView("view-editor");expWrap.classList.add("on");setTimeout(runExport,400);}
+  if(s==="batch"){showView("view-batch");renderBatch(true);}
+  if(s==="toasts"){toast("Background removed");setTimeout(()=>toast("Cached — works offline"),900);}
+  if(s==="error"){toast("Image too large for this device's memory — try a smaller file",true);}
+}
+$("#btnKeepFast").onclick=()=>{$("#hqBanner").classList.remove("on");toast("Staying on fast tier");};
+$("#btnPlayAll").onclick=async()=>{
+  closeStates();
+  const seq=["download","hq","scan","recompute","skeleton","export","batch","toasts"];
+  showView("view-editor");
+  toast("Playing all states — watch");
+  for(const s of seq){playState(s); await new Promise(r=>setTimeout(r,s==="download"?5200:3400));}
+  showView("view-editor");toast("Replay anytime via States");
+};
+
+/* shortcuts */
+document.addEventListener("keydown",e=>{
+  const ed=$("#view-editor").classList.contains("on");
+  if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="z"){e.preventDefault();(e.shiftKey?$("#btnRedo"):$("#btnUndo")).click();return;}
+  if(!ed||e.target.tagName==="INPUT")return;
+  const tools={1:"remove",2:"refine",3:"background",4:"effects",5:"canvas"};
+  if(tools[e.key])setTool(tools[e.key]);
+  if(e.key.toLowerCase()==="b")setCompare(compareMode==="before"?"after":"before");
+  if(e.key==="["){$("#brushSize").value=Math.max(4,+$("#brushSize").value-8);$("#brushSize").dispatchEvent(new Event("input"));}
+  if(e.key==="]"){$("#brushSize").value=Math.min(160,+$("#brushSize").value+8);$("#brushSize").dispatchEvent(new Event("input"));}
+  if(e.key==="Escape"){expWrap.classList.remove("on");closeStates();localPop.classList.remove("on");}
+});
+
+/* init */
+renderBatch(false);
+applyT();sizePaint();
+document.addEventListener("keydown",e=>{if(e.key==="?"&&$("#view-editor").classList.contains("on"))toast("1–5 tools · B compare · [ ] brush · Space pan");});
+</script>
+<script type="module" src="/src/main.ts"></script>
+</body>
+</html>

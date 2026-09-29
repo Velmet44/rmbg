@@ -185,7 +185,9 @@ interface Engine {
 }
 ```
 
-- `segment` runs at working resolution (default longest side 1024, see §7), returns working-res alpha; engine upsamples to full-res via joint/guided upsampling against the original RGB.
+- `segment` runs at working resolution (default longest side 512 — the largest
+  size the gated browser-compatible exports accept), returns working-res alpha;
+  engine upsamples to full-res via joint/guided upsampling against the original RGB.
 - `recomputeRegion` patches only the bbox area (with context padding + edge blending); outside the region the mask is bit-identical.
 - Brush ops are synchronous, pure, and undoable as single ops.
 
@@ -218,10 +220,13 @@ Binding constraints:
 First-run model download is the primary abandonment risk. The following are requirements, not suggestions:
 
 1. **Fetch on page load.** Model runtime + fast-tier weights begin downloading during landing idle, before any image is selected. Image selection and model download proceed in parallel.
-2. **Fast preview, background HQ upgrade.** Tier `fast` (small, ~5–15 MB class) renders the first result as quickly as possible. Tier `quality` continues downloading and, when ready, refines the mask automatically with a low-key status change (`Enhanced to high quality`). The user never waits for the large model to see value. Manual override (stay on Fast / force HQ) is available but not required.
+2. **Fast preview, background HQ upgrade.** Tier `fast` (the smaller/faster-inference model) renders the first result as quickly as possible. Tier `quality` continues downloading and, when ready, refines the mask automatically with a low-key status change (`Enhanced to high quality`). The user never waits for the large model to see value. Manual override (stay on Fast / force HQ) is available but not required. First-run download size is whatever the gated checkpoints measure (hundreds-of-MB class for current BiRefNet builds — the harness records exact bytes per revision); a truly tiny fast model and self-hosted weights on a well-peered CDN are Stage-2 optimizations, not S0 assumptions.
 3. **Download vs upload messaging.** Any progress indicator distinguishes `Local AI model download (MB / total, cached after first visit)` from image handling. The image is never described as uploading to a server.
 4. **Working resolution first.** Inference runs at working resolution; full-resolution output is produced by upsampling the mask against original RGB (see §7). This bounds latency and memory while honoring original-resolution export.
 5. **Persistent cache.** Runtime and weights persist via Service Worker + Cache API / IndexedDB (whichever the adapter uses — exactly one owner, no dual caches). Return visits skip download entirely except for versioned manifest updates, which are diffed by checksum.
+   The inference runtime itself loads from a pinned CDN ESM build at runtime
+   (verified: vite-bundling the runtime produced silently broken sessions).
+   Self-hosting the runtime file alongside the weights is a Stage-2 step.
 6. **Degradation paths.** No WebGPU → WASM fallback with adjusted time estimate. OOM or memory pressure → explicit message + technical expand + suggested action (smaller image, close tabs, stay on Fast tier). No generic spinner over a frozen image: old result stays visible during recompute; export shows determinate progress.
 
 ## 7. Performance and memory requirements
@@ -286,21 +291,26 @@ Weights, fixtures, and exports never enter git. Bundle contains code + manifests
 
 ## 13. Build order (stages)
 
-### Stage 0 — Model gate and harness
+> Status 2026-09-29: **Stage 0 DONE** (gate record: `benchmarks/GATE.md`),
+> **Stage 1 DONE** (engine + app verified end-to-end on the giraffe fixture:
+> upload → fast remove → inspect → PNG export at original resolution, fully
+> local). Stages 2–4 not started.
+
+### Stage 0 — Model gate and harness ✅ DONE
 
 - Finalize `models/manifest.json` (default fast + quality MIT checkpoints, licenses, checksums).
 - Stand up `benchmarks/harness` + fixed torture set references.
 - Run all candidate default models in-browser (WebGPU + WASM) and record download size, cold/warm latency, peak memory, quality scores.
 - Exit criteria: one fast tier and one quality tier pass their bars; OOM boundaries documented; license audit signed off (default MIT, BYOM path defined).
 
-### Stage 1 — Engine core
+### Stage 1 — Engine core ✅ DONE
 
 - Implement `ImageRef`, float-alpha `Mask store`, op log, `SegmentationAdapter` for the gated checkpoints.
 - Implement `removeBackground`, working-res inference + full-res upsampling, `composite`, PNG/WebP/JPEG `export` at original resolution.
 - Unit tests on synthetic masks (brush math, feather, composite, history) + adapter contract tests with fixture tensors.
 - Exit criteria: scripted remove → export passes headless with network disabled after cache; no DOM dependency in engine.
 
-### Stage 2 — Instant shell
+### Stage 2 — Instant shell ⬜ NEXT
 
 - Landing ingest (picker, drop, paste, mobile picker), page-load model prefetch, Cache API/IndexedDB persistence.
 - Fast-first flow: fast preview immediately, HQ auto-upgrade in background, honest progress (download vs image handling), session reuse.

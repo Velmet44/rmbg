@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>RMBG harness page</title>
+<link rel="icon" href="data:," />
+</head>
+<body>
+<pre id="log">harness ready</pre>
+<script type="module">
+import { pipeline, RawImage, env } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.0/+esm';
+// Verbose ORT logging: we are diagnosing a late-graph execution failure,
+// need the failing node name, not just the numeric code.
+try { if (env.backends?.onnx) env.backends.onnx.logLevel = 'verbose'; } catch {}
+// Fully local inference: model bytes download once into the browser cache,
+// image pixels never leave this page.
+const logEl = document.getElementById('log');
+const log = (m) => {
+  const line = `[${new Date().toISOString().slice(11, 19)}] ${m}`;
+  logEl.textContent += '\n' + line;
+};
+
+let segmenter = null;
+let currentKey = null;
+
+/** Never benchmark on a software rasterizer: it hangs or crawls instead of
+ *  failing cleanly. Detect SwiftShader/llvmpipe and go straight to WASM. */
+async function pickDevice(requested) {
+  if (requested !== 'webgpu') return { device: 'wasm', dtype: 'fp32', note: 'requested' };
+  try {
+    const adapter = await navigator.gpu?.requestAdapter?.();
+    const info = adapter?.info || {};
+    const text = `${info.device || ''} ${info.architecture || ''} ${info.description || ''} ${info.vendor || ''}`;
+    if (/swiftshader|llvmpipe|software|basic render/i.test(text)) {
+      return { device: 'wasm', dtype: 'fp32', note: `software-webgpu-detected:${text.trim().slice(0, 80)}` };
+    }
+    return { device: 'webgpu', dtype: 'fp16', note: 'hardware-webgpu' };
+  } catch {
+    return { device: 'wasm', dtype: 'fp32', note: 'webgpu-unavailable' };
+  }
+}
+
+window.__rmbgHarness = {
+  log: '',
+
+  async init({ modelId, device }) {
+    const picked = await pickDevice(device);
+    const key = modelId + '|' + picked.device + '/' + picked.dtype;
+    const bytes = { total: 0, files: {} };
+    const t0 = performance.now();
+    let lastProg = 0;
+    if (!segmenter || currentKey !== key) {
+      if (segmenter?.dispose) await segmenter.dispose();
+      segmenter = await pipeline('image-segmentation', modelId, {
+        device: picked.device,
+        dtype: picked.dtype,
+        progress_callback: (p) => {
+          if (p.status === 'progress' && p.total) {
+            bytes.files[p.file] = p.total;
+            bytes.total = Object.values(bytes.files).reduce((a, b) => a + b, 0);
+            lastProg = performance.now();
+            log(`dl ${p.file}: ${p.loaded}/${p.total}`);
+          }
+        },
+      });
+      currentKey = key;
+    }
+    const end = performance.now();
+    // Download ends at the last progress event; the rest is session build
+    // (graph compile + memory planning). Split so slow-CDN vs slow-CPU blame is visible.
+    const downloadMs = lastProg ? lastProg - t0 : 0;
+    const sessionMs = lastProg ? end - lastProg : end - t0;
+    log(`init ${key} in ${((end - t0) / 1000).toFixed(0)}s (dl ${(downloadMs / 1000).toFixed(0)}s + session ${(sessionMs / 1000).toFixed(0)}s), ${(bytes.total / 1048576).toFixed(1)}MB`);
+    return { key, device: picked.device, dtype: picked.dtype, note: picked.note, initMs: end - t0, downloadMs, sessionMs, bytes };
+  },
+
+  async infer({ imageUrl, maxSide = 0 }) {
+    if (!segmenter) throw new Error('init() first');
+    let img = await RawImage.fromURL(imageUrl);
+    if (maxSide > 0) {
+      const longest = Math.max(img.width, img.height);
+      if (longest > maxSide) {
+        const s = maxSide / longest;
+        const c = document.createElement('canvas');
+        c.width = Math.round(img.width * s); c.height = Math.round(img.height * s);
+        const tmp = document.createElement('canvas');
+        tmp.width = img.width; tmp.height = img.height;
+        // RawImage is RGB; canvas needs RGBA.
+        const src = img.data, ch = Math.round(src.length / (img.width * img.height));
+        const rgba = new Uint8ClampedArray(img.width * img.height * 4);
+        for (let i = 0; i < img.width * img.height; i++) {
+          rgba[i * 4] = src[i * ch]; rgba[i * 4 + 1] = src[i * ch + 1]; rgba[i * 4 + 2] = src[i * ch + 2];
+          rgba[i * 4 + 3] = 255;
+        }
+        tmp.getContext('2d').putImageData(new ImageData(rgba, img.width, img.height), 0, 0);
+        c.getContext('2d').drawImage(tmp, 0, 0, c.width, c.height);
+        img = await RawImage.fromCanvas(c);
+        log(`downscaled input to ${c.width}x${c.height}`);
+      }
+    }
+    const t = performance.now();
+    const out = await segmenter(img);
+    const ms = performance.now() - t;
+    const list = Array.isArray(out) ? out : [out];
+    const best = list.reduce((a, b) => ((b.score ?? 0) > (a.score ?? 0) ? b : a));
+    const mask = best.mask;
+    const c = document.createElement('canvas');
+    c.width = mask.width; c.height = mask.height;
+    const ctx = c.getContext('2d');
+    const id = ctx.createImageData(mask.width, mask.height);
+    const d = mask.data, ch = Math.round(d.length / (mask.width * mask.height));
+    for (let i = 0; i < mask.width * mask.height; i++) {
+      const v = d[i * ch];
+      id.data[i * 4] = id.data[i * 4 + 1] = id.data[i * 4 + 2] = v;
+      id.data[i * 4 + 3] = 255;
+    }
+    ctx.putImageData(id, 0, 0);
+    log(`infer ${ms.toFixed(0)}ms -> ${mask.width}x${mask.height}`);
+    return { inferMs: ms, maskWidth: mask.width, maskHeight: mask.height, maskPng: c.toDataURL('image/png') };
+  },
+
+  progress() {
+    return logEl.textContent;
+  },
+};
+log('harness ready');
+</script>
+</body>
+</html>

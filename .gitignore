@@ -14,3 +14,21 @@ Thumbs.db
 # Logs
 *.log
 logs/
+
+# Node / build
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Playwright CLI artifacts
+.playwright-cli/
+
+# Local scratch: untracked mockups, fixtures, helpers
+temp/
+serve.bat
+benchmarks/harness/fixtures/*.jpg
+benchmarks/harness/fixtures/*.jpeg
+benchmarks/harness/fixtures/*.png
+!benchmarks/harness/fixtures/README.md
+benchmarks/harness/results/*.json
+!benchmarks/harness/results/README.md

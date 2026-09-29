@@ -1,0 +1,108 @@
+import type { AlphaMask, Background, Effects, ImageRef } from './types.js';
+
+export interface CompositeResult {
+  width: number;
+  height: number;
+  /** Packed RGBA. Length = width * height * 4. */
+  rgba: Uint8ClampedArray;
+}
+
+/**
+ * composite = original RGB × final alpha over background (+ optional shadow).
+ * Pure function, no DOM. Never mutates inputs.
+ */
+export function composite(
+  image: ImageRef, mask: AlphaMask, bg: Background, fx: Effects,
+): CompositeResult {
+  if (image.width !== mask.width || image.height !== mask.height) {
+    throw new Error('composite: image and mask sizes differ');
+  }
+  const { width: w, height: h } = image;
+  const rgba = new Uint8ClampedArray(w * h * 4);
+
+  // Optional drop shadow, computed from alpha, drawn under the subject.
+  let shadow: Float32Array | null = null;
+  if (fx.shadow.on) {
+    shadow = new Float32Array(w * h);
+    const dx = Math.round(fx.shadow.dx), dy = Math.round(fx.shadow.dy);
+    for (let y = 0; y < h; y++) {
+      const sy = y - dy;
+      if (sy < 0 || sy >= h) continue;
+      for (let x = 0; x < w; x++) {
+        const sx = x - dx;
+        if (sx < 0 || sx >= w) continue;
+        shadow[y * w + x] = mask.alpha[sy * w + sx] * fx.shadow.opacity;
+      }
+    }
+    const r = Math.max(0, Math.round(fx.shadow.blur));
+    if (r > 0) shadow = boxBlur(shadow, w, h, r);
+  }
+
+  let bgRgb: Uint8ClampedArray | null = null;
+  if (bg.kind === 'image' && bg.image) bgRgb = coverFit(bg.image, w, h);
+
+  for (let i = 0; i < w * h; i++) {
+    const a = Math.min(1, Math.max(0, mask.alpha[i]));
+    const sr = image.rgb[i * 3], sg = image.rgb[i * 3 + 1], sb = image.rgb[i * 3 + 2];
+    let br = 0, bgc = 0, bb = 0, ba = 0;
+    if (bg.kind === 'color' && bg.color) {
+      [br, bgc, bb] = bg.color; ba = 1;
+    } else if (bg.kind === 'image' && bgRgb) {
+      br = bgRgb[i * 3]; bgc = bgRgb[i * 3 + 1]; bb = bgRgb[i * 3 + 2]; ba = 1;
+    }
+    // Subject over background.
+    let r = sr * a + br * (1 - a) * ba;
+    let g = sg * a + bgc * (1 - a) * ba;
+    let b = sb * a + bb * (1 - a) * ba;
+    let alpha = bg.kind === 'transparent' ? a : a + ba * (1 - a);
+    if (shadow) {
+      // Shadow shows only where the subject is (semi-)transparent.
+      const s = shadow[i] * (1 - a);
+      r = r * (1 - s) ; g = g * (1 - s); b = b * (1 - s);
+      if (bg.kind === 'transparent') alpha = Math.min(1, alpha + s);
+    }
+    const o = i * 4;
+    rgba[o] = r; rgba[o + 1] = g; rgba[o + 2] = b; rgba[o + 3] = alpha * 255;
+  }
+  return { width: w, height: h, rgba };
+}
+
+/** Cover-fit an RGB image to exact dimensions (center crop). */
+function coverFit(img: ImageRef, w: number, h: number): Uint8ClampedArray {
+  const scale = Math.max(w / img.width, h / img.height);
+  const sw = w / scale, sh = h / scale;
+  const sx = (img.width - sw) / 2, sy = (img.height - sh) / 2;
+  const out = new Uint8ClampedArray(w * h * 3);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const ix = Math.min(img.width - 1, Math.max(0, Math.floor(sx + x / scale)));
+      const iy = Math.min(img.height - 1, Math.max(0, Math.floor(sy + y / scale)));
+      const s = (iy * img.width + ix) * 3, d = (y * w + x) * 3;
+      out[d] = img.rgb[s]; out[d + 1] = img.rgb[s + 1]; out[d + 2] = img.rgb[s + 2];
+    }
+  }
+  return out;
+}
+
+function boxBlur(src: Float32Array, w: number, h: number, radius: number): Float32Array {
+  const tmp = new Float32Array(w * h);
+  const out = new Float32Array(w * h);
+  const win = 2 * radius + 1;
+  for (let y = 0; y < h; y++) {
+    let acc = 0;
+    for (let x = -radius; x <= radius; x++) acc += src[y * w + Math.min(w - 1, Math.max(0, x))];
+    for (let x = 0; x < w; x++) {
+      tmp[y * w + x] = acc / win;
+      acc += src[y * w + Math.min(w - 1, x + radius + 1)] - src[y * w + Math.max(0, x - radius)];
+    }
+  }
+  for (let x = 0; x < w; x++) {
+    let acc = 0;
+    for (let y = -radius; y <= radius; y++) acc += tmp[Math.min(h - 1, Math.max(0, y)) * w + x];
+    for (let y = 0; y < h; y++) {
+      out[y * w + x] = acc / win;
+      acc += tmp[Math.min(h - 1, y + radius + 1) * w + x] - tmp[Math.max(0, y - radius) * w + x];
+    }
+  }
+  return out;
+}

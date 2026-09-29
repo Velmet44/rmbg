@@ -1,0 +1,68 @@
+{
+  "$schema": "./manifest.schema.json",
+  "updated": "2026-09-29",
+  "artifacts": [
+    {
+      "modelId": "birefnet-lite",
+      "tier": "fast",
+      "role": "default-fast",
+      "displayName": "BiRefNet-lite 512 (fast preview)",
+      "source": "https://huggingface.co/studioludens/birefnet-lite-512",
+      "revision": "4a3c40c36c94093cc1e724d9ea428b8fa4b57dc7",
+      "weights": "studioludens/birefnet-lite-512",
+      "baseModel": "ZhengPeng7/BiRefNet_lite",
+      "license": "MIT",
+      "licenseUrl": "https://huggingface.co/studioludens/birefnet-lite-512",
+      "attribution": "BiRefNet by Zheng et al. (CAAI AIR 2024); 512px browser export by studioludens",
+      "modifications": "none by RMBG (upstream fp32 + fp16 ONNX)",
+      "files": ["onnx/model.onnx", "onnx/model_fp16.onnx", "config.json", "preprocessor_config.json"],
+      "bytes": 98484532,
+      "bytesNote": "onnx/model_fp16.onnx measured 2026-09-29 via CDN headers; onnx/model.onnx (fp32, WASM CPU path) is 191877254 bytes",
+      "checksum": null,
+      "inputSize": 1024,
+      "backends": ["webgpu", "wasm"]
+    },
+    {
+      "modelId": "birefnet-general",
+      "tier": "quality",
+      "role": "default-quality",
+      "displayName": "BiRefNet 512 (high quality, GPU-only)",
+      "source": "https://huggingface.co/naddy24/birefnet-512-webgpu",
+      "revision": "ca02a86c094927479e2be583abe87f8ea73fcfda",
+      "weights": "naddy24/birefnet-512-webgpu",
+      "baseModel": "onnx-community/BiRefNet_512x512-ONNX",
+      "license": "MIT",
+      "licenseUrl": "https://huggingface.co/naddy24/birefnet-512-webgpu",
+      "attribution": "BiRefNet by Zheng et al. (CAAI AIR 2024); 512px browser export (empty ScatterND removed) by naddy24",
+      "modifications": "none by RMBG (upstream fp16 ONNX; fp16-only, no fp32 file)",
+      "files": ["onnx/model_fp16.onnx", "config.json", "preprocessor_config.json"],
+      "bytes": 473435223,
+      "bytesNote": "onnx/model_fp16.onnx per CDN headers 2026-09-29; fp16-only so this tier requires WebGPU (no WASM CPU fallback); gate measurement pending adequate hardware",
+      "inputSize": 1024,
+      "backends": ["webgpu", "wasm"]
+    },
+    {
+      "modelId": "rmbg-1.4",
+      "tier": "quality",
+      "role": "byom-only",
+      "displayName": "RMBG-1.4 (reference / BYOM only)",
+      "source": "https://huggingface.co/briaai/RMBG-1.4",
+      "revision": "2ceba5a5efaec153162aedea169f76caf9b46cf8",
+      "weights": "briaai/RMBG-1.4",
+      "baseModel": "briaai/RMBG-1.4",
+      "license": "OTHER (bria-rmbg-1.4, non-commercial, source-available)",
+      "licenseUrl": "https://bria.ai/bria-huggingface-model-license-agreement/",
+      "attribution": "BRIA AI",
+      "modifications": "not distributed by RMBG",
+      "files": [],
+      "checksum": null,
+      "inputSize": 1024,
+      "backends": [],
+      "note": "Must NOT ship as default. Supported only as user-supplied BYOM: the user provides the weights and accepts the upstream license in-app before download."
+    }
+  ],
+  "notes": {
+    "weightsPolicy": "Weights are never committed to git. This manifest is the only record; the harness verifies license + revision before measuring.",
+    "checksum": "checksum fields are filled by the harness after first verified download (SHA-256 of the fetched onnx files) and then pinned."
+  }
+}
