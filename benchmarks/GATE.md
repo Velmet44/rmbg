@@ -27,6 +27,8 @@ effective to HF CDN (US AWS from India). No usable GPU (SwiftShader only).
   ossicones intact, zebras/tree correctly excluded. See
   `benchmarks/harness/results/giraffe-mask.png`.
   (20 s reflects this box's weak GPU + Dawn overhead, not a product ceiling.)
+- **Return visit**: reload + same image re-segments in ~30 s with no
+  re-download (browser cache persists); cutout identical.
 
 ## Rig
 

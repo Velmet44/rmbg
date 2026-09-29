@@ -35,7 +35,7 @@ Or serve the production build with the untracked local helper:
 ## Verify
 
 ```sh
-npm test --workspace @rmbg/engine   # engine unit tests (17, DOM-free)
+npm test --workspace @rmbg/engine   # engine unit tests (21, DOM-free)
 npm run measure --workspace @rmbg/harness -- --model=studioludens/birefnet-lite-512 --device=webgpu
 ```
 
