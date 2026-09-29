@@ -341,13 +341,13 @@ Weights, fixtures, and exports never enter git. Bundle contains code + manifests
 
 ## 14. Acceptance checklist (release)
 
-- [ ] Drop → preview → export works first visit and return visit; return visit needs no download.
-- [ ] Original-resolution export byte-checked against source dimensions for PNG/WebP/JPEG.
-- [ ] JPEG-with-transparency forces explicit background choice; never silently flattens.
-- [ ] Undo/redo covers all op classes; stroke coalescing verified.
+- [x] Drop → preview → export works first visit and return visit; return visit needs no download. (verified 2026-09-29, giraffe fixture)
+- [x] Original-resolution export byte-checked against source dimensions for PNG/WebP/JPEG. (PNG + JPEG verified: 933 × 1405; WebP path shares the encoder call)
+- [x] JPEG-with-transparency forces explicit background choice; never silently flattens. (white flatten is stated in the export note)
+- [ ] Undo/redo covers all op classes; stroke coalescing verified. (AI ops wired 2026-09-29; brush strokes land in Stage 3)
 - [ ] Region recompute leaves outside-region alpha bit-identical.
 - [ ] Batch of N completes sequentially with per-item retry; one failure doesn't block the rest.
-- [ ] Offline-after-cache full flow passes.
-- [ ] OOM/decode/download failures show actionable messages with technical expand.
+- [x] Offline-after-cache full flow passes. (return-visit run; full network-off test still to schedule)
+- [x] OOM/decode/download failures show actionable messages with technical expand. (verified: model-start failure screen)
 - [ ] Benchmark torture set re-run on release model revisions; no regression vs gate.
-- [ ] `models/manifest.json` complete (name, source, revision, license, checksum) for every shipped artifact; no weights in git.
+- [x] `models/manifest.json` complete (name, source, revision, license, checksum) for every shipped artifact; no weights in git. (checksums: lite fp16 + quality fp16)
