@@ -450,7 +450,9 @@ async function realStart(_withDemo: boolean) {
     W.showView('view-editor');
     lastCompare = 'after';
     refreshDisplay();
-    W.runScan('Detecting subject…');
+    // Reveal, don't flash: the editor opens on the original and wipes to
+    // the cutout. The wipe itself is the processing feedback (no spinner).
+    runReveal();
     W.toast(`Background removed in ${((performance.now() - t0) / 1000).toFixed(1)}s · ${state.backend}`);
     setTimeout(() => $('#fb').classList.add('on'), 2500);
     // The bubble overlaps the canvas: dismiss it automatically, it stays
@@ -477,7 +479,50 @@ async function rerun() {
   }
 }
 
+/** Reveal wipe: after segmentation the editor opens on the ORIGINAL, then a
+ *  left-to-right wipe reveals the cutout (remove.bg-style), instead of
+ *  flashing the result instantly. Skipped for reduced-motion users.
+ *  Bump revealToken to cancel (compare switches, new image). */
+let revealToken = 0;
+function runReveal() {
+  if (!state.image) return;
+  const checker = $('#checker') as HTMLElement;
+  let ov = $('#revealUI') as HTMLElement | null;
+  if (!ov) {
+    ov = document.createElement('div');
+    ov.id = 'revealUI';
+    ov.style.cssText = 'position:absolute;inset:0;display:none;z-index:8;overflow:hidden;border-radius:6px';
+    const cv = document.createElement('canvas');
+    cv.id = 'revealC';
+    cv.style.cssText = 'position:absolute;inset:0;width:100%;height:100%';
+    const line = document.createElement('div');
+    line.id = 'revealLine';
+    line.style.cssText = 'position:absolute;top:0;bottom:0;width:2px;background:var(--accent);box-shadow:0 0 14px rgba(52,211,153,.9)';
+    ov.appendChild(cv); ov.appendChild(line);
+    checker.appendChild(ov);
+  }
+  const cv = $('#revealC') as HTMLCanvasElement;
+  const line = $('#revealLine') as HTMLElement;
+  drawOriginal(cv, state.image);
+  const my = ++revealToken;
+  ov.style.display = 'block';
+  const finish = () => { if (my === revealToken) ov!.style.display = 'none'; };
+  if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) { finish(); return; }
+  const t0 = performance.now(), DUR = 900;
+  const frame = (t: number) => {
+    if (my !== revealToken) return;
+    const k = Math.min(1, (t - t0) / DUR);
+    const e = 1 - Math.pow(1 - k, 3);
+    cv.style.clipPath = `inset(0 0 0 ${e * 100}%)`;
+    line.style.left = `${e * 100}%`;
+    if (k < 1) requestAnimationFrame(frame);
+    else finish();
+  };
+  requestAnimationFrame(frame);
+}
+
 function realCompare(m: string) {
+  revealToken++;
   lastCompare = m;
   ($('#splitUI') as HTMLElement).classList.toggle('on', m === 'split');
   $$('.seg button').forEach((b) => (b as HTMLElement).classList.toggle('on', (b as HTMLElement).dataset.view === m));

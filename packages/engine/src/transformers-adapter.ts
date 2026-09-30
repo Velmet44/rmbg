@@ -121,19 +121,37 @@ export class TransformersAdapter implements SegmentationAdapter {
     try {
       return await this.runOnce(image);
     } catch (e) {
-      if (!this.deviceUsed?.startsWith('webgpu')) throw e;
+      let err: unknown = e;
+      // Transient device loss on weak GPUs (MapAsync/bad_alloc): rebuild the
+      // session once from cached files and retry before changing backends.
+      if (this.deviceUsed?.startsWith('webgpu') && isDeviceLoss(String(e))) {
+        try {
+          await this.dispose();
+          await this.init();
+          return await this.runOnce(image);
+        } catch (e2) {
+          err = e2;
+        }
+      }
+      if (!this.deviceUsed?.startsWith('webgpu')) throw err;
       // One automatic backend fallback: WebGPU execution can fail on
       // headless/weak GPUs even when session creation succeeds.
       // Fall through to WASM fp32 and retry once.
       await this.dispose();
-      const { pipeline, RawImage } = await this.runtime();
-      this.RawImageCtor = RawImage;
-      this.seg = await pipeline('image-segmentation', this.modelId, {
-        device: 'wasm' as any,
-        dtype: 'fp32' as any,
-      });
-      this.deviceUsed = 'wasm/fp32-fallback';
-      return await this.runOnce(image);
+      try {
+        const { pipeline, RawImage } = await this.runtime();
+        this.RawImageCtor = RawImage;
+        this.seg = await pipeline('image-segmentation', this.modelId, {
+          device: 'wasm' as any,
+          dtype: 'fp32' as any,
+        });
+        this.deviceUsed = 'wasm/fp32-fallback';
+        return await this.runOnce(image);
+      } catch (we) {
+        throw new Error(
+          `webgpu failed (${String(err).slice(0, 140)}); wasm fallback failed (${String(we).slice(0, 140)})`,
+        );
+      }
     }
   }
 
@@ -199,8 +217,12 @@ export class TransformersAdapter implements SegmentationAdapter {
   }
 }
 
-function pickBest(out: any): any {
-  const list = Array.isArray(out) ? out : [out];
+/** Transient GPU failure signatures worth one session rebuild before giving up. */
+function isDeviceLoss(msg: string): boolean {
+  return /MapAsync|bad_alloc|ERROR_CODE:\s*6|device lost|device removed/i.test(msg);
+}
+
+function pickBest(out: any): any {  const list = Array.isArray(out) ? out : [out];
   if (list.length === 0) throw new Error('TransformersAdapter: empty model output');
   let best = list[0];
   for (const c of list) {

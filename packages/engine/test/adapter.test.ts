@@ -20,9 +20,14 @@ function fakeRuntime(opts: { failDevices?: string[]; maskSize?: number } = {}) {
   return { calls, loadRuntime: async () => ({ pipeline, RawImage }) };
 }
 
-function fakePipe(size: number) {
+function fakePipe(size: number, failRuns = 0) {
+  let runs = 0;
   const data = new Uint8ClampedArray(size * size).fill(200);
-  return async (_raw: any) => [{ label: 'fg', score: 0.9, mask: { width: size, height: size, data } }];
+  return async (_raw: any) => {
+    runs++;
+    if (runs <= failRuns) throw new Error('MapAsyncStatus was false (simulated device loss)');
+    return [{ label: 'fg', score: 0.9, mask: { width: size, height: size, data } }];
+  };
 }
 
 function img(): ImageRef {
@@ -58,6 +63,27 @@ describe('TransformersAdapter lifecycle', () => {
     expect(ad.backend).toBe('wasm/fp32');
     const mask = await ad.segment(img(), { hint: 'auto', tier: 'fast' });
     expect(mask.width).toBe(16);
+  });
+
+  it('retries once in-place on transient device loss', async () => {
+    const rt = fakeRuntime();
+    let failRuns = 1;
+    const loadRuntime = async () => ({
+      pipeline: async () => {
+        const pipe = await (async () => fakePipe(8))();
+        return async (raw: any) => {
+          if (failRuns > 0) { failRuns--; throw new Error('MapAsyncStatus was false'); }
+          return pipe(raw);
+        };
+      },
+      RawImage: class {},
+    });
+    const ad = new TransformersAdapter('m', { device: 'webgpu', loadRuntime });
+    await ad.init();
+    const mask = await ad.segment(img(), { hint: 'auto', tier: 'fast' });
+    expect(ad.backend).toBe('webgpu/fp16');
+    expect(mask.alpha[0]).toBeCloseTo(200 / 255, 5);
+    void rt;
   });
 
   it('retries init after failure', async () => {
