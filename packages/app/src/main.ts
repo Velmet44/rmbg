@@ -169,7 +169,6 @@ async function decodeToImageRef(f: File, id: string): Promise<ImageRef> {
 // ---------- result display ----------
 
 let resultCanvas: HTMLCanvasElement | null = null;
-let splitCanvas: HTMLCanvasElement | null = null;
 let lastCompare = 'after';
 
 function fitChecker(w: number, h: number) {
@@ -189,28 +188,64 @@ function ensureCanvases(img: ImageRef) {
     checker.appendChild(resultCanvas);
   }
   resultCanvas.width = img.width; resultCanvas.height = img.height;
-  const splitR = $('#splitR') as HTMLElement;
-  if (!splitCanvas) {
-    splitCanvas = document.createElement('canvas');
-    splitCanvas.style.cssText = 'max-width:90%;max-height:70%';
-    splitR.appendChild(splitCanvas);
+  ensureSplit(img);
+  // Paint must stay on top of every image layer (result canvas included).
+  const paint = $('#paintLayer') as HTMLCanvasElement | null;
+  if (paint) checker.appendChild(paint);
+}
+
+/** Split layers live INSIDE the checker (so they inherit zoom/pan) as two
+ *  full-res canvases at identical size — the divider can never disagree
+ *  about scale again. */
+let splitPos = 50;
+function ensureSplit(img: ImageRef) {
+  const checker = $('#checker') as HTMLElement;
+  const ui = $('#splitUI') as HTMLElement;
+  if (ui.parentElement !== checker) checker.appendChild(ui);
+  ui.style.inset = '0';
+  let lc = $('#splitLC') as HTMLCanvasElement | null;
+  if (!lc) {
+    ui.innerHTML = '';
+    const mk = (id: string, tag: string, side: 'left' | 'right') => {
+      const half = document.createElement('div');
+      half.className = 'half';
+      half.style.cssText = 'position:absolute;inset:0;';
+      const cv = document.createElement('canvas');
+      cv.id = id;
+      cv.style.cssText = 'position:absolute;inset:0;width:100%;height:100%';
+      const tg = document.createElement('span');
+      tg.className = 'tag';
+      tg.style[side] = '10px';
+      tg.textContent = tag;
+      half.appendChild(cv); half.appendChild(tg);
+      ui.appendChild(half);
+      return half;
+    };
+    mk('splitLC', 'ORIGINAL', 'left');
+    const rHalf = mk('splitRC', 'CUTOUT', 'right');
+    const div = document.createElement('div');
+    div.id = 'splitDiv2';
+    div.style.cssText = 'position:absolute;top:0;bottom:0;width:2px;background:var(--accent);cursor:ew-resize;box-shadow:0 0 12px rgba(52,211,153,.8);z-index:5';
+    ui.appendChild(div);
+    let dragging = false;
+    const pos = (e: PointerEvent) => {
+      const r = (checker as HTMLElement).getBoundingClientRect();
+      splitPos = Math.max(2, Math.min(98, ((e.clientX - r.left) / r.width) * 100));
+      rHalf.style.clipPath = `inset(0 0 0 ${splitPos}%)`;
+      div.style.left = splitPos + '%';
+    };
+    ui.addEventListener('pointerdown', (e) => { dragging = true; (ui as HTMLElement).setPointerCapture?.(e.pointerId); pos(e as PointerEvent); });
+    ui.addEventListener('pointermove', (e) => { if (dragging) pos(e as PointerEvent); });
+    ui.addEventListener('pointerup', () => { dragging = false; });
+    ui.addEventListener('pointercancel', () => { dragging = false; });
+    lc = $('#splitLC') as HTMLCanvasElement;
   }
-  const splitImg = $('#splitOrig') as HTMLImageElement | null;
-  const splitL = $('#splitL') as HTMLElement;
-  if (!splitImg && state.previewURL) {
-    // Real photo replaces the mock gradient: exact cover, same aspect as the
-    // checker (fitChecker sizes the stage to the image).
-    splitL.style.background = 'none';
-    const svg = splitL.querySelector('svg');
-    if (svg) (svg as unknown as HTMLElement).style.display = 'none';
-    const el = document.createElement('img');
-    el.id = 'splitOrig';
-    el.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;object-fit:cover';
-    splitL.appendChild(el);
-    el.src = state.previewURL;
-  } else if (splitImg && state.previewURL) {
-    splitImg.src = state.previewURL;
-  }
+  // Re-assert clip on rebuild.
+  const rHalf = lc.parentElement?.nextElementSibling as HTMLElement | null;
+  const div = $('#splitDiv2') as HTMLElement | null;
+  if (rHalf) rHalf.style.clipPath = `inset(0 0 0 ${splitPos}%)`;
+  if (div) div.style.left = splitPos + '%';
+  void img;
 }
 
 function drawComposite(target: HTMLCanvasElement, mask: AlphaMask, bg: Background, maxSide = 0) {
@@ -253,6 +288,17 @@ function refreshDisplay() {
   const demo = $('#demoSubject') as HTMLElement;
   demo.style.display = 'none';
   const up = $('#uploadedImg') as HTMLImageElement;
+  if (lastCompare === 'split') {
+    up.style.display = 'none';
+    resultCanvas.style.display = 'none';
+    const lc = $('#splitLC') as HTMLCanvasElement | null;
+    const rc = $('#splitRC') as HTMLCanvasElement | null;
+    if (lc && rc) {
+      drawOriginal(lc, state.image);
+      drawComposite(rc, state.mask, BG_TRANSPARENT);
+    }
+    return;
+  }
   if (lastCompare === 'before') {
     up.style.display = 'block';
     resultCanvas.style.display = 'none';
@@ -265,13 +311,29 @@ function refreshDisplay() {
     resultCanvas.style.display = 'block';
     drawComposite(resultCanvas, state.mask, BG_TRANSPARENT);
   }
-  if (splitCanvas) drawComposite(splitCanvas, state.mask, BG_TRANSPARENT, 480);
+}
+
+/** Draw the original photo into a full-res canvas (split-view left half). */
+function drawOriginal(target: HTMLCanvasElement, img: ImageRef) {
+  target.width = img.width; target.height = img.height;
+  const ctx = target.getContext('2d')!;
+  const id = ctx.createImageData(img.width, img.height);
+  for (let i = 0; i < img.width * img.height; i++) {
+    id.data[i * 4] = img.rgb[i * 3];
+    id.data[i * 4 + 1] = img.rgb[i * 3 + 1];
+    id.data[i * 4 + 2] = img.rgb[i * 3 + 2];
+    id.data[i * 4 + 3] = 255;
+  }
+  ctx.putImageData(id, 0, 0);
 }
 
 // ---------- real flows (override mockup globals) ----------
 
 async function realLoadFile(f: File) {
   if (!f.type.startsWith('image/')) { W.toast('Not an image file', true); return; }
+  // Reset the picker so re-selecting the SAME file still fires change.
+  const picker = $('#fileInput') as HTMLInputElement | null;
+  if (picker) picker.value = '';
   try {
     const ref = await decodeToImageRef(f, f.name);
     state.image = ref;
