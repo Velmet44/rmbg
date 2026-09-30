@@ -10,9 +10,11 @@
 
 import {
   OpLog,
+  applyBrushStroke,
   composite,
   type AlphaMask,
   type Background,
+  type BrushStroke,
   type Effects,
   type ImageRef,
   type ModelProgress,
@@ -247,6 +249,7 @@ function drawMaskGray(target: HTMLCanvasElement, mask: AlphaMask) {
 function refreshDisplay() {
   if (!state.image || !state.mask || !resultCanvas) return;
   syncUndoRedo();
+  syncStrokeButtons();
   const demo = $('#demoSubject') as HTMLElement;
   demo.style.display = 'none';
   const up = $('#uploadedImg') as HTMLImageElement;
@@ -403,12 +406,118 @@ async function realExport() {
 // Introspection for verification/debugging (harmless in production).
 (window as unknown as Record<string, any>).__rmbg = { state };
 
+// ---------- brush strokes → real mask ----------
+// The overlay canvas is display-space paint. Strokes are recorded here as
+// vectors (in overlay pixels) and committed to the full-res mask on Apply,
+// so nothing touches the cutout until the user says so. Each Apply is one
+// undo step per stroke via the OpLog.
+interface PendingStroke { mode: 'erase' | 'restore'; points: { x: number; y: number }[]; size: number; softness: number }
+let pendingStrokes: PendingStroke[] = [];
+let curStroke: PendingStroke | null = null;
+
+function paintPoint(e: PointerEvent): { x: number; y: number } | null {
+  const checker = $('#checker') as HTMLElement;
+  const paint = $('#paintLayer') as HTMLCanvasElement | null;
+  if (!checker || !paint || paint.width === 0) return null;
+  const r = checker.getBoundingClientRect();
+  return {
+    x: ((e.clientX - r.left) / r.width) * paint.width,
+    y: ((e.clientY - r.top) / r.height) * paint.height,
+  };
+}
+
+function brushActive(): boolean {
+  return ($('#stage') as HTMLElement)?.classList.contains('brushing') ?? false;
+}
+
+function activeBrushMode(): 'erase' | 'restore' {
+  const on = document.querySelector('[data-br].on') as HTMLElement | null;
+  return on?.dataset.br === 'restore' ? 'restore' : 'erase';
+}
+
+function syncStrokeButtons() {
+  const apply = $('#btnApplyStrokes') as HTMLButtonElement | null;
+  if (apply) {
+    apply.disabled = pendingStrokes.length === 0 || !state.mask;
+    apply.textContent = `Apply (${pendingStrokes.length})`;
+  }
+}
+
+function clearOverlay() {
+  const paint = $('#paintLayer') as HTMLCanvasElement | null;
+  paint?.getContext('2d')?.clearRect(0, 0, paint.width, paint.height);
+  pendingStrokes = [];
+  curStroke = null;
+  syncStrokeButtons();
+}
+
+function installStrokeCapture() {
+  const stage = $('#stage') as HTMLElement;
+  stage.addEventListener('pointerdown', (e) => {
+    if (!brushActive() || (e.button !== 0 && e.pointerType === 'mouse')) return;
+    const pt = paintPoint(e as PointerEvent);
+    if (!pt) return;
+    const size = +(( $('#brushSize') as HTMLInputElement)?.value ?? 48);
+    const soft = +(( $('#brushSoft') as HTMLInputElement)?.value ?? 40) / 100;
+    curStroke = { mode: activeBrushMode(), points: [pt], size, softness: soft };
+  });
+  stage.addEventListener('pointermove', (e) => {
+    if (!curStroke || !brushActive()) return;
+    if (e.buttons === 0 && e.pointerType === 'mouse') return;
+    const pt = paintPoint(e as PointerEvent);
+    if (pt) curStroke.points.push(pt);
+  });
+  const end = () => {
+    if (curStroke && curStroke.points.length > 0) pendingStrokes.push(curStroke);
+    curStroke = null;
+    syncStrokeButtons();
+  };
+  stage.addEventListener('pointerup', end);
+  stage.addEventListener('pointercancel', () => { curStroke = null; });
+  ($('#btnClearStrokes') as HTMLButtonElement)?.addEventListener('click', () => {
+    clearOverlay();
+    W.toast('Strokes discarded');
+  });
+  ($('#btnApplyStrokes') as HTMLButtonElement)?.addEventListener('click', () => {
+    if (!state.mask || pendingStrokes.length === 0) return;
+    const paint = $('#paintLayer') as HTMLCanvasElement | null;
+    const sx = paint && paint.width > 0 ? state.mask.width / paint.width : 1;
+    const sy = paint && paint.height > 0 ? state.mask.height / paint.height : 1;
+    try {
+      for (const s of pendingStrokes) {
+        const stroke: BrushStroke = {
+          points: s.points.map((p) => ({ x: p.x * sx, y: p.y * sy })),
+          size: s.size * sx,
+          softness: s.softness,
+        };
+        // One undo step per stroke.
+        applyBrushDirect(state.mask, stroke, s.mode);
+      }
+      const n = pendingStrokes.length;
+      clearOverlay();
+      refreshDisplay();
+      W.toast(`Applied ${n} stroke${n === 1 ? '' : 's'}`);
+    } catch (err) {
+      W.toast(`Apply failed: ${String(err).slice(0, 120)}`, true);
+    }
+  });
+}
+
+function applyBrushDirect(mask: AlphaMask, stroke: BrushStroke, mode: 'erase' | 'restore') {
+  state.log.commitRegion(mask, mode, (m) => {
+    const box = applyBrushStroke(m, stroke, mode);
+    return box.w === 0 ? { x: 0, y: 0, w: 0, h: 0 } : box;
+  });
+}
+
 // ---------- install overrides ----------
 
 W.loadFile = realLoadFile;
 W.startPreparing = realStart;
 W.setCompare = realCompare;
 W.runExport = realExport;
+installStrokeCapture();
+syncStrokeButtons();
 
 $('#btnRecompute').addEventListener('click', () => { void rerun(); });
 function syncUndoRedo() {

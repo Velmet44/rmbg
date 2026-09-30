@@ -542,6 +542,11 @@
             <div class="slider-row"><label>Softness <b id="brushSoftV">40%</b></label><input type="range" id="brushSoft" min="0" max="100" value="40"></div>
             <button class="mini" id="btnShowMask">Show mask</button>
             <button class="mini" id="btnShowOrig">Show original</button>
+            <div class="row" style="margin-top:10px">
+              <button class="btn small primary" id="btnApplyStrokes" disabled>Apply (0)</button>
+              <button class="btn small ghost" id="btnClearStrokes">Clear</button>
+            </div>
+            <p class="tip">Paint, then <b>Apply</b> commits strokes to the cutout (undoable). Clear discards them.</p>
           </div>
           <div class="card hidden" id="guidedCard">
             <h4>Guided selection</h4>
