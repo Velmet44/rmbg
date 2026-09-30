@@ -12,7 +12,9 @@ export { createMask, cloneMask, boxDownsampleRGB, upsampleAlphaBilinear, packRGB
 export { applyBrushStroke, featherInPlace, contractInPlace } from './ops.js';
 export { composite } from './composite.js';
 export { OpLog } from './history.js';
-export { TransformersAdapter, type TransformersDevice } from './transformers-adapter.js';
+export { TransformersAdapter, type TransformersDevice, DEFAULT_RUNTIME_URL } from './transformers-adapter.js';
+export { transformSubject, invertTransformPoint, isIdentityTransform, IDENTITY_TRANSFORM, type SubjectTransform, type Transformed } from './transform.js';
+export { growRegion, type GrownRegion } from './guided.js';
 
 /** Longest side used for neural inference. Full-res output comes from upsampling.
  *  512px: browser-compatible exports (patched ScatterND-free graphs) top out

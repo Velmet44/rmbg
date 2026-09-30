@@ -3,24 +3,29 @@ import { clampBox } from './mask.js';
 import { restoreRegion, snapshotRegion } from './ops.js';
 
 /**
- * Operation-based history over the mask. Each entry stores only the
- * changed region (before/after), never full-image snapshots per stroke.
- * Full-mask entries are used only for AI ops and are depth-bounded.
+ * Operation-based history. Entries are closures, so mask patches and
+ * parameter snapshots interleave in ONE timeline (AI ops, brush strokes,
+ * effect/background/transform changes all undo together, in order).
  */
-interface Entry {
+export interface LogEntry {
   label: string;
-  undo(m: AlphaMask): void;
-  redo(m: AlphaMask): void;
+  undo(): void;
+  redo(): void;
 }
 
 export class OpLog {
-  private undoStack: Entry[] = [];
-  private redoStack: Entry[] = [];
+  private undoStack: LogEntry[] = [];
+  private redoStack: LogEntry[] = [];
   constructor(private maxDepth = 40) {}
 
   get canUndo(): boolean { return this.undoStack.length > 0; }
   get canRedo(): boolean { return this.redoStack.length > 0; }
   get depth(): number { return this.undoStack.length; }
+
+  /** Generic entry (parameter snapshots, etc.). */
+  commit(label: string, undo: () => void, redo: () => void): void {
+    this.push({ label, undo, redo });
+  }
 
   /** Run `mut` against the mask and record the changed region for undo. */
   commitRegion(mask: AlphaMask, label: string, mut: (m: AlphaMask) => BBox | null): void {
@@ -31,10 +36,11 @@ export class OpLog {
     const box = mut(mask);
     if (box === null || box.w * box.h > mask.width * mask.height * 0.5) {
       const postFull = new Float32Array(mask.alpha);
+      const refW = mask.width, refH = mask.height;
       this.push({
         label,
-        undo: (m) => { this.assertSize(m, mask); m.alpha.set(preFull); },
-        redo: (m) => { this.assertSize(m, mask); m.alpha.set(postFull); },
+        undo: () => { this.assertSize(mask, refW, refH); mask.alpha.set(preFull); },
+        redo: () => { this.assertSize(mask, refW, refH); mask.alpha.set(postFull); },
       });
       return;
     }
@@ -43,28 +49,28 @@ export class OpLog {
     const before = { box: b, data: this.regionOf(preFull, mask.width, b) };
     this.push({
       label,
-      undo: (m) => restoreRegion(m, before.box, before.data),
-      redo: (m) => restoreRegion(m, after.box, after.data),
+      undo: () => restoreRegion(mask, before.box, before.data),
+      redo: () => restoreRegion(mask, after.box, after.data),
     });
   }
 
-  undo(mask: AlphaMask): string | null {
+  undo(): string | null {
     const e = this.undoStack.pop();
     if (!e) return null;
-    e.undo(mask);
+    e.undo();
     this.redoStack.push(e);
     return e.label;
   }
 
-  redo(mask: AlphaMask): string | null {
+  redo(): string | null {
     const e = this.redoStack.pop();
     if (!e) return null;
-    e.redo(mask);
+    e.redo();
     this.undoStack.push(e);
     return e.label;
   }
 
-  private push(e: Entry): void {
+  private push(e: LogEntry): void {
     this.undoStack.push(e);
     if (this.undoStack.length > this.maxDepth) this.undoStack.shift();
     this.redoStack = [];
@@ -78,9 +84,9 @@ export class OpLog {
     return data;
   }
 
-  private assertSize(m: AlphaMask, ref: AlphaMask): void {
-    if (m.width !== ref.width || m.height !== ref.height) {
-      throw new Error(`OpLog: mask size changed (${m.width}x${m.height} vs ${ref.width}x${ref.height})`);
+  private assertSize(m: AlphaMask, w: number, h: number): void {
+    if (m.width !== w || m.height !== h) {
+      throw new Error(`OpLog: mask size changed (${m.width}x${m.height} vs ${w}x${h})`);
     }
   }
 }

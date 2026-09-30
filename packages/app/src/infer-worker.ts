@@ -46,6 +46,33 @@ self.onmessage = async (e: MessageEvent) => {
     } finally {
       busy = false;
     }
+    return;
+  }
+  if (msg?.type === 'recompute') {
+    // Region recompute: re-run segmentation on bbox+context, patch only that
+    // area. Transfers-voxel ownership like segment (copies stay main-side).
+    if (busy) {
+      (self as any).postMessage({ id: msg.id, type: 'error', message: 'busy' });
+      return;
+    }
+    busy = true;
+    try {
+      const image: ImageRef = {
+        id: msg.imageId, width: msg.w, height: msg.h, rgb: new Uint8ClampedArray(msg.rgb),
+      };
+      const mask = {
+        width: msg.mw, height: msg.mh, alpha: new Float32Array(msg.alpha),
+      };
+      const next = await adapter.recomputeRegion(image, mask, msg.bbox, { hint: 'auto' });
+      (self as any).postMessage(
+        { id: msg.id, type: 'mask', w: next.width, h: next.height, alpha: next.alpha.buffer },
+        [next.alpha.buffer],
+      );
+    } catch (err) {
+      (self as any).postMessage({ id: msg.id, type: 'error', message: String(err).slice(0, 300) });
+    } finally {
+      busy = false;
+    }
   }
 };
 

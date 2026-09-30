@@ -30,7 +30,13 @@ effective to HF CDN (US AWS from India). No usable GPU (SwiftShader only).
 - **Return visit**: reload + same image re-segments in ~30 s with no
   re-download (browser cache persists); cutout identical.
 
-## Rig
+## Stage 3 evidence (2026-09-30, giraffe fixture, in-app)
+
+- Background color + subject transform (70% scale screenshot), shadow +
+  feather sliders (screenshot), guided click-to-region (history depth grew,
+  zero errors), manual brush Apply + Undo restore (screenshots), region
+  recompute commit (depth grew, no errors), unified undo across AI/brush/
+  param ops (button-state cycle). Engine suite: 29 green.
 
 `measure.mjs` step-wise with per-phase timeouts, timestamped logging,
 download/session-build split timing, software-WebGPU auto-skip,

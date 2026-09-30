@@ -21,10 +21,13 @@ cd packages/app
 npx vite
 ```
 
-Wired in Stage 1 (real, local): ingest (picker/drop/paste), fast-first
-remove with background HQ upgrade, before/after/split/mask inspect, zoom/pan,
-PNG/WebP/JPEG export at original resolution. Refine brushes, background,
-effects, and batch UI exist as shell and land in later stages.
+Wired in Stage 1 (real, local): ingest (picker/drop/paste), fast remove,
+inspect (before/after/split/mask, zoom/pan), PNG/WebP/JPEG export at
+original resolution.
+Wired in Stage 3: erase/restore brushes with Apply, guided click-to-region,
+region recompute, background (transparent/color/image) + subject transform,
+shadow, feather, defringe — all undoable through one history.
+Still shell: custom resolution, batch.
 
 Or serve the production build with the untracked local helper:
 

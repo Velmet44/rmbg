@@ -11,13 +11,23 @@
 import {
   OpLog,
   applyBrushStroke,
+  boxDownsampleRGB,
   composite,
+  contractInPlace,
+  featherInPlace,
+  growRegion,
+  invertTransformPoint,
+  isIdentityTransform,
+  transformSubject,
+  upsampleAlphaBilinear,
   type AlphaMask,
   type Background,
+  type BBox,
   type BrushStroke,
   type Effects,
   type ImageRef,
   type ModelProgress,
+  type SubjectTransform,
 } from '@rmbg/engine';
 
 const W = window as unknown as Record<string, any>;
@@ -30,6 +40,7 @@ const FX_OFF: Effects = {
   defringe: 0,
 };
 const BG_TRANSPARENT: Background = { kind: 'transparent' };
+const TR_IDENTITY: SubjectTransform = { scale: 1, rotation: 0, dx: 0, dy: 0 };
 
 interface AppState {
   image: ImageRef | null;
@@ -37,9 +48,60 @@ interface AppState {
   mask: AlphaMask | null;
   backend: string;
   log: OpLog;
+  fx: Effects;
+  bg: Background;
+  tr: SubjectTransform;
 }
 
-const state: AppState = { image: null, previewURL: null, mask: null, backend: '…', log: new OpLog() };
+const state: AppState = {
+  image: null, previewURL: null, mask: null, backend: '…', log: new OpLog(),
+  fx: JSON.parse(JSON.stringify(FX_OFF)), bg: { ...BG_TRANSPARENT }, tr: { ...TR_IDENTITY },
+};
+
+function snapshotParams() {
+  return {
+    fx: JSON.parse(JSON.stringify(state.fx)) as Effects,
+    bg: { ...state.bg } as Background,
+    tr: { ...state.tr } as SubjectTransform,
+  };
+}
+type ParamSnap = ReturnType<typeof snapshotParams>;
+function restoreParams(s: ParamSnap) {
+  state.fx = JSON.parse(JSON.stringify(s.fx));
+  state.bg = { ...s.bg };
+  state.tr = { ...s.tr };
+  syncFxControls();
+}
+
+/** Commit a finishing change (effects/background/transform) as one undo step. */
+function commitFx(label: string, mut: () => void) {
+  const before = snapshotParams();
+  mut();
+  const after = snapshotParams();
+  state.log.commit(label, () => { restoreParams(before); refreshDisplay(); }, () => { restoreParams(after); refreshDisplay(); });
+  refreshDisplay();
+  syncFxControls();
+}
+
+/** Canonical mask + finishing params → the pixels actually shown/exported.
+ *  Transform applies only over a replacement background (SPEC); feather/
+ *  defringe are presentation-time on a copy — the canonical mask is never
+ *  touched except by AI, brushes, guided, and recompute. */
+function derivedView(): { image: ImageRef; mask: AlphaMask } {
+  const img = state.image!, msk = state.mask!;
+  let image = img, mask = msk;
+  if (state.bg.kind !== 'transparent' && !isIdentityTransform(state.tr)) {
+    const t = transformSubject(img, msk, state.tr);
+    image = t.image; mask = t.mask;
+  }
+  if (state.fx.feather > 0 || state.fx.defringe > 0) {
+    const copy: AlphaMask = { width: mask.width, height: mask.height, alpha: new Float32Array(mask.alpha) };
+    if (state.fx.defringe > 0) contractInPlace(copy, state.fx.defringe);
+    if (state.fx.feather > 0) featherInPlace(copy, state.fx.feather);
+    mask = copy;
+  }
+  return { image, mask };
+}
 
 // ---------- worker client ----------
 // One request at a time (the worker enforces it too); responses route by id.
@@ -248,9 +310,8 @@ function ensureSplit(img: ImageRef) {
   void img;
 }
 
-function drawComposite(target: HTMLCanvasElement, mask: AlphaMask, bg: Background, maxSide = 0) {
-  const img = state.image!;
-  const out = composite(img, mask, bg, FX_OFF);
+function drawComposite(target: HTMLCanvasElement, view: { image: ImageRef; mask: AlphaMask }, bg: Background, fx: Effects, maxSide = 0) {
+  const out = composite(view.image, view.mask, bg, fx);
   // Reused scratch canvas: avoids a full-res allocation per redraw.
   blit.width = out.width; blit.height = out.height;
   blit.getContext('2d')!.putImageData(
@@ -295,7 +356,8 @@ function refreshDisplay() {
     const rc = $('#splitRC') as HTMLCanvasElement | null;
     if (lc && rc) {
       drawOriginal(lc, state.image);
-      drawComposite(rc, state.mask, BG_TRANSPARENT);
+      const view = derivedView();
+      drawComposite(rc, view, state.bg, state.fx);
     }
     return;
   }
@@ -309,7 +371,8 @@ function refreshDisplay() {
   } else {
     up.style.display = 'none';
     resultCanvas.style.display = 'block';
-    drawComposite(resultCanvas, state.mask, BG_TRANSPARENT);
+    const view = derivedView();
+    drawComposite(resultCanvas, view, state.bg, state.fx);
   }
 }
 
@@ -346,6 +409,7 @@ async function realLoadFile(f: File) {
     $('#dimLbl').textContent = `${ref.width} × ${ref.height}`;
     $('#expDims').textContent = `${ref.width} × ${ref.height} · PNG · transparent`;
     ensureCanvases(ref);
+    wireFinishing();
     W.startPreparing(false);
   } catch (e) {
     W.toast(`Could not decode that image: ${String(e)}`, true);
@@ -436,15 +500,19 @@ async function realExport() {
   wrap.classList.remove('hidden');
   ($('#expBar') as HTMLElement).style.width = '15%';
   try {
+    const view = derivedView();
     let canvas = resultCanvas;
     let note = `${state.image.width} × ${state.image.height} · ${fmt}`;
-    if (fmt === 'JPEG' && (document.querySelector('[data-bg].on') as HTMLElement | null)?.dataset.bg !== 'color') {
+    if (fmt === 'JPEG' && state.bg.kind === 'transparent') {
       // JPEG cannot carry transparency: composite onto white for this export
       // only (stated, never silent), without touching the stored mask.
       const tmp = document.createElement('canvas');
-      drawComposite(tmp, state.mask, { kind: 'color', color: [255, 255, 255] });
+      drawComposite(tmp, view, { kind: 'color', color: [255, 255, 255] }, state.fx);
       canvas = tmp;
       note += ' · flattened onto white (JPEG has no transparency)';
+    } else {
+      drawComposite(resultCanvas, view, state.bg, state.fx);
+      note += state.bg.kind === 'transparent' ? ' · transparent' : ' · with background';
     }
     ($('#expBar') as HTMLElement).style.width = '60%';
     const mime = fmt === 'PNG' ? 'image/png' : fmt === 'WebP' ? 'image/webp' : 'image/jpeg';
@@ -545,11 +613,18 @@ function installStrokeCapture() {
     const paint = $('#paintLayer') as HTMLCanvasElement | null;
     const sx = paint && paint.width > 0 ? state.mask.width / paint.width : 1;
     const sy = paint && paint.height > 0 ? state.mask.height / paint.height : 1;
+    // Overlay paint aligns with the DISPLAYED (possibly transformed) subject;
+    // map back to canonical mask space so strokes land where the user painted.
+    const warped = state.bg.kind !== 'transparent' && !isIdentityTransform(state.tr);
     try {
       for (const s of pendingStrokes) {
+        const pts = s.points.map((p) => ({ x: p.x * sx, y: p.y * sy }));
+        const mapped = warped
+          ? pts.map((p) => invertTransformPoint(state.tr, state.mask!.width, state.mask!.height, p.x, p.y))
+          : pts;
         const stroke: BrushStroke = {
-          points: s.points.map((p) => ({ x: p.x * sx, y: p.y * sy })),
-          size: s.size * sx,
+          points: mapped,
+          size: (s.size * sx) / (warped ? state.tr.scale : 1),
           softness: s.softness,
         };
         // One undo step per stroke.
@@ -572,6 +647,353 @@ function applyBrushDirect(mask: AlphaMask, stroke: BrushStroke, mode: 'erase' | 
   });
 }
 
+// ---------- finishing: effects / background / transform ----------
+
+function num(id: string): HTMLInputElement {
+  return document.getElementById(id) as HTMLInputElement;
+}
+function paintSliderLabel(id: string, fmt: (v: number) => string) {
+  const lbl = document.getElementById(id + 'V');
+  if (lbl) lbl.textContent = fmt(+num(id).value);
+}
+
+/** Keep every finishing control visually in sync with state (also after undo). */
+function syncFxControls() {
+  if (!state.image) return;
+  $$('#p-effects [data-sh]').forEach((r) => {
+    (r as HTMLElement).classList.toggle('on', ((r as HTMLElement).dataset.sh === 'on') === state.fx.shadow.on);
+  });
+  ($('#shadowCtrls') as HTMLElement)?.classList.toggle('hidden', !state.fx.shadow.on);
+  const set = (id: string, v: number, fmt: (x: number) => string) => {
+    num(id).value = String(v); paintSliderLabel(id, fmt);
+  };
+  const pct = (v: number) => `${v}%`, px = (v: number) => `${v}px`, deg = (v: number) => `${v}°`;
+  set('shOp', state.fx.shadow.opacity, pct);
+  set('shBlur', state.fx.shadow.blur, px);
+  set('shDist', state.fx.shadow.dx, px);
+  set('feather', state.fx.feather, px);
+  set('defringe', state.fx.defringe, (v) => `${v}`);
+  set('subScale', Math.round(state.tr.scale * 100), pct);
+  set('subRot', state.tr.rotation, deg);
+  set('subX', Math.round((state.tr.dx / state.image.width) * 100), pct);
+  set('subY', Math.round((state.tr.dy / state.image.height) * 100), pct);
+  $$('#p-background [data-bg]').forEach((r) => {
+    (r as HTMLElement).classList.toggle('on', (r as HTMLElement).dataset.bg === state.bg.kind);
+  });
+  ($('#bgColorBox') as HTMLElement)?.classList.toggle('hidden', state.bg.kind !== 'color');
+  ($('#bgImageBox') as HTMLElement)?.classList.toggle('hidden', state.bg.kind !== 'image');
+  ($('#subjectCard') as HTMLElement)?.classList.toggle('hidden', state.bg.kind === 'transparent');
+  ($('#jpegWarn') as HTMLElement)?.classList.toggle('hidden', state.bg.kind !== 'transparent');
+  const checker = $('#checker') as HTMLElement;
+  checker.style.background = '';
+  checker.style.backgroundSize = '';
+  if (state.bg.kind === 'color' && state.bg.color) {
+    const hex = '#' + state.bg.color.map((c) => Math.round(c).toString(16).padStart(2, '0')).join('');
+    num('bgColor').value = hex;
+    ($('#bgHex') as HTMLElement).textContent = hex.toUpperCase();
+    $$('.sw').forEach((s) => (s as HTMLElement).classList.toggle('on', (s as HTMLElement).dataset.c === hex));
+  }
+  const fmt = selectedFormat();
+  $('#expDims').textContent =
+    `${state.image.width} × ${state.image.height} · ${fmt} · ${state.bg.kind === 'transparent' ? 'transparent' : 'with background'}`;
+}
+
+function bindFxSlider(id: string, label: string, set: (v: number) => void, fmt: (v: number) => string) {
+  const el = num(id);
+  let before: ParamSnap | null = null;
+  el.addEventListener('pointerdown', () => { before = snapshotParams(); });
+  el.addEventListener('focus', () => { before = snapshotParams(); });
+  el.addEventListener('input', () => { set(+el.value); paintSliderLabel(id, fmt); refreshDisplay(); });
+  el.addEventListener('change', () => {
+    paintSliderLabel(id, fmt);
+    refreshDisplay();
+    if (before) {
+      const after = snapshotParams();
+      const b = before;
+      state.log.commit(label, () => { restoreParams(b); refreshDisplay(); }, () => { restoreParams(after); refreshDisplay(); });
+      before = null;
+      syncUndoRedo();
+    }
+  });
+}
+
+function wireFinishing() {
+  if (!state.image) return;
+  // Shadow on/off (discrete → immediate history entry).
+  $$('#p-effects [data-sh]').forEach((r) => {
+    (r as HTMLElement).addEventListener('click', () => {
+      const on = (r as HTMLElement).dataset.sh === 'on';
+      if (on === state.fx.shadow.on) return;
+      commitFx(`shadow ${on ? 'on' : 'off'}`, () => { state.fx.shadow.on = on; });
+    });
+  });
+  const pct = (v: number) => `${v}%`, px = (v: number) => `${v}px`, deg = (v: number) => `${v}°`;
+  bindFxSlider('shOp', 'shadow opacity', (v) => { state.fx.shadow.opacity = v; }, pct);
+  bindFxSlider('shBlur', 'shadow blur', (v) => { state.fx.shadow.blur = v; }, px);
+  bindFxSlider('shDist', 'shadow distance', (v) => { state.fx.shadow.dx = v; state.fx.shadow.dy = v; }, px);
+  bindFxSlider('feather', 'feather', (v) => { state.fx.feather = v; }, px);
+  bindFxSlider('defringe', 'defringe', (v) => { state.fx.defringe = v; }, (v) => `${v}`);
+  // Background kind.
+  $$('#p-background [data-bg]').forEach((b) => {
+    (b as HTMLElement).addEventListener('click', () => {
+      const kind = (b as HTMLElement).dataset.bg as Background['kind'];
+      if (kind === state.bg.kind) return;
+      commitFx(`background ${kind}`, () => {
+        if (kind === 'transparent') state.bg = { kind };
+        else if (kind === 'color') state.bg = { kind, color: state.bg.color ?? [255, 255, 255] };
+        else state.bg = state.bg.kind === 'image' ? state.bg : { kind };
+      });
+    });
+  });
+  num('bgColor').addEventListener('input', () => {
+    const hex = num('bgColor').value;
+    const c: [number, number, number] = [
+      parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16),
+    ];
+    state.bg = { kind: 'color', color: c };
+    refreshDisplay();
+    syncFxControls();
+  });
+  num('bgColor').addEventListener('change', () => {
+    const hex = num('bgColor').value;
+    const c: [number, number, number] = [
+      parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16),
+    ];
+    const before = snapshotParams();
+    state.bg = { kind: 'color', color: c };
+    const after = snapshotParams();
+    state.log.commit('background color', () => { restoreParams(before); refreshDisplay(); }, () => { restoreParams(after); refreshDisplay(); });
+    refreshDisplay();
+    syncUndoRedo();
+  });
+  $$('.sw').forEach((s) => {
+    (s as HTMLElement).addEventListener('click', () => {
+      const hex = (s as HTMLElement).dataset.c ?? '#ffffff';
+      const c: [number, number, number] = [
+        parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16),
+      ];
+      commitFx('background color', () => { state.bg = { kind: 'color', color: c }; });
+    });
+  });
+  ($('#btnBgUpload') as HTMLButtonElement)?.addEventListener('click', () => bgPicker.click());
+  // Subject transform (percent sliders → px against current image).
+  const img = () => state.image!;
+  bindFxSlider('subScale', 'subject scale', (v) => { state.tr.scale = v / 100; }, pct);
+  bindFxSlider('subRot', 'subject rotation', (v) => { state.tr.rotation = v; }, deg);
+  bindFxSlider('subX', 'subject position', (v) => { state.tr.dx = (v / 100) * img().width; }, pct);
+  bindFxSlider('subY', 'subject position', (v) => { state.tr.dy = (v / 100) * img().height; }, pct);
+  ($('#btnSubReset') as HTMLButtonElement)?.addEventListener('click', () => {
+    commitFx('subject reset', () => { state.tr = { scale: 1, rotation: 0, dx: 0, dy: 0 }; });
+  });
+  syncFxControls();
+}
+
+const bgPicker = (() => {
+  const el = document.createElement('input');
+  el.type = 'file';
+  el.accept = 'image/*';
+  el.hidden = true;
+  document.body.appendChild(el);
+  el.addEventListener('change', async () => {
+    const f = el.files?.[0];
+    el.value = '';
+    if (!f) return;
+    try {
+      const before = snapshotParams();
+      const ref = await decodeToImageRef(f, f.name);
+      state.bg = { kind: 'image', image: ref };
+      const after = snapshotParams();
+      state.log.commit('background image', () => { restoreParams(before); refreshDisplay(); }, () => { restoreParams(after); refreshDisplay(); });
+      refreshDisplay();
+      syncUndoRedo();
+      W.toast('Background image set');
+    } catch (e) {
+      W.toast(`Could not decode background: ${String(e).slice(0, 100)}`, true);
+    }
+  });
+  return el;
+})();
+
+// ---------- recompute region + guided select ----------
+
+function refineMode(): string | null {
+  return (document.querySelector('[data-br].on') as HTMLElement | null)?.dataset.br ?? null;
+}
+function guidedMode(): 'erase' | 'restore' {
+  const on = document.querySelector('[data-g].on') as HTMLElement | null;
+  return on?.dataset.g === 'restore' ? 'restore' : 'erase';
+}
+function updateNoPan() {
+  (W as any).__rmbgNoPan = refineMode() === 'recompute';
+}
+
+function toImageCoords(e: PointerEvent): { x: number; y: number } | null {
+  const img = state.image;
+  const checker = $('#checker') as HTMLElement;
+  if (!img || !checker) return null;
+  const r = checker.getBoundingClientRect();
+  if (r.width === 0 || r.height === 0) return null;
+  return {
+    x: ((e.clientX - r.left) / r.width) * img.width,
+    y: ((e.clientY - r.top) / r.height) * img.height,
+  };
+}
+
+let recompBox: BBox | null = null;
+function boxEl(): HTMLDivElement {
+  let el = $('#recompBox') as HTMLDivElement | null;
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'recompBox';
+    el.style.cssText = 'position:absolute;border:1.5px dashed var(--accent);background:rgba(52,211,153,.08);display:none;z-index:6;pointer-events:none;border-radius:4px';
+    ($('#checker') as HTMLElement).appendChild(el);
+  }
+  return el;
+}
+
+function installRefineCapture() {
+  const stage = $('#stage') as HTMLElement;
+  let anchor: { x: number; y: number } | null = null;
+  let downAt: { x: number; y: number } | null = null;
+  const boxToClient = (a: { x: number; y: number }, b: { x: number; y: number }) => {
+    const img = state.image!;
+    const r = ($('#checker') as HTMLElement).getBoundingClientRect();
+    const x0 = Math.min(a.x, b.x), y0 = Math.min(a.y, b.y);
+    const x1 = Math.max(a.x, b.x), y1 = Math.max(a.y, b.y);
+    const el = boxEl();
+    el.style.display = 'block';
+    el.style.left = `${(x0 / img.width) * r.width}px`;
+    el.style.top = `${(y0 / img.height) * r.height}px`;
+    el.style.width = `${((x1 - x0) / img.width) * r.width}px`;
+    el.style.height = `${((y1 - y0) / img.height) * r.height}px`;
+  };
+  stage.addEventListener('pointerdown', (e) => {
+    if (!state.mask) return;
+    if (refineMode() === 'recompute' && (e.button === 0 || e.pointerType !== 'mouse')) {
+      const pt = toImageCoords(e as PointerEvent);
+      if (pt) { anchor = pt; boxToClient(pt, pt); }
+    }
+    downAt = { x: e.clientX, y: e.clientY };
+  });
+  stage.addEventListener('pointermove', (e) => {
+    if (!anchor || refineMode() !== 'recompute') return;
+    const pt = toImageCoords(e as PointerEvent);
+    if (pt) boxToClient(anchor, pt);
+  });
+  stage.addEventListener('pointerup', (e) => {
+    const moved = downAt ? Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y) : 999;
+    downAt = null;
+    if (refineMode() === 'recompute') {
+      const pt = anchor && toImageCoords(e as PointerEvent);
+      if (anchor && pt) {
+        const x = Math.round(Math.min(anchor.x, pt.x)), y = Math.round(Math.min(anchor.y, pt.y));
+        const w = Math.round(Math.abs(pt.x - anchor.x)), h = Math.round(Math.abs(pt.y - anchor.y));
+        if (w >= 8 && h >= 8 && state.image) {
+          recompBox = {
+            x: Math.max(0, x), y: Math.max(0, y),
+            w: Math.min(state.image.width - Math.max(0, x), w),
+            h: Math.min(state.image.height - Math.max(0, y), h),
+          };
+          W.toast('Region marked — hit Recompute selection');
+        } else {
+          recompBox = null;
+          boxEl().style.display = 'none';
+        }
+      }
+      anchor = null;
+      return;
+    }
+    // Guided: a clean click (not a drag) selects + applies a region.
+    if (refineMode() === 'guided' && moved < 6 && state.image && state.mask) {
+      const pt = toImageCoords(e as PointerEvent);
+      if (pt) void guidedApply(pt.x, pt.y);
+    }
+    anchor = null;
+  });
+  ($('#btnRecompGo') as HTMLButtonElement)?.addEventListener('click', () => { void recomputeApply(); });
+  $$('[data-tool],[data-br]').forEach((b) => b.addEventListener('click', () => {
+    updateNoPan();
+    if (refineMode() !== 'recompute') {
+      recompBox = null;
+      const el = $('#recompBox') as HTMLDivElement | null;
+      if (el) el.style.display = 'none';
+    }
+  }));
+  updateNoPan();
+}
+
+async function recomputeApply() {
+  if (!state.image || !state.mask) return;
+  if (!recompBox) { W.toast('Drag a box over the problem area first'); return; }
+  const box = { ...recompBox };
+  W.runScan('Re-evaluating selection…');
+  try {
+    const img = state.image;
+    const imgCopy = new Uint8ClampedArray(img.rgb);
+    const maskCopy = new Float32Array(state.mask.alpha);
+    const res = await callWorker({
+      type: 'recompute', imageId: img.id,
+      w: img.width, h: img.height, rgb: imgCopy.buffer,
+      mw: state.mask.width, mh: state.mask.height, alpha: maskCopy.buffer,
+      bbox: box,
+    }, [imgCopy.buffer, maskCopy.buffer]);
+    const prev = state.mask;
+    const next = { width: res.w, height: res.h, alpha: new Float32Array(res.alpha) };
+    state.mask = next;
+    state.log.commit('recompute region',
+      () => { state.mask = prev; refreshDisplay(); },
+      () => { state.mask = next; refreshDisplay(); });
+    recompBox = null;
+    (boxEl() as HTMLElement).style.display = 'none';
+    refreshDisplay();
+    W.toast('Region recomputed — rest untouched');
+  } catch (e) {
+    W.toast(`Recompute failed: ${String(e).slice(0, 140)}`, true);
+  }
+}
+
+async function guidedApply(x: number, y: number) {
+  const img = state.image!, mask = state.mask!;
+  const mode = guidedMode();
+  // Grow on a downsampled copy: texture (spots, grain, fur) averages out so
+  // one click selects the coherent subject, not a single spot. The grown
+  // region is bilinearly upsampled back, which also softens its boundary.
+  const S = 256;
+  const s = Math.min(1, S / Math.max(img.width, img.height));
+  const dw = Math.max(8, Math.round(img.width * s)), dh = Math.max(8, Math.round(img.height * s));
+  const small: ImageRef = {
+    id: img.id + '#guided', width: dw, height: dh,
+    rgb: boxDownsampleRGB(img.rgb, img.width, img.height, dw, dh),
+  };
+  const grown = growRegion(small, x * s, y * s);
+  if (grown.box.w < 3 || grown.box.h < 3) { W.toast('No clear region there — try another spot'); return; }
+  const target = mode === 'erase' ? 0 : 1;
+  const full = upsampleAlphaBilinear(grown.alpha, dw, dh, img.width, img.height);
+  const { box } = grown;
+  const fx0 = box.x / dw * img.width, fy0 = box.y / dh * img.height;
+  const fx1 = (box.x + box.w) / dw * img.width, fy1 = (box.y + box.h) / dh * img.height;
+  const fb = {
+    x: Math.max(0, Math.floor(fx0)), y: Math.max(0, Math.floor(fy0)),
+    w: Math.min(img.width, Math.ceil(fx1)) - Math.max(0, Math.floor(fx0)),
+    h: Math.min(img.height, Math.ceil(fy1)) - Math.max(0, Math.floor(fy0)),
+  };
+  let touched = 0;
+  state.log.commitRegion(mask, `guided ${mode}`, (m) => {
+    for (let yy = 0; yy < fb.h; yy++) {
+      for (let xx = 0; xx < fb.w; xx++) {
+        if (full[(fb.y + yy) * img.width + (fb.x + xx)] > 0.5) {
+          m.alpha[(fb.y + yy) * m.width + (fb.x + xx)] = target;
+          touched++;
+        }
+      }
+    }
+    return touched === 0 ? { x: 0, y: 0, w: 0, h: 0 } : { ...fb };
+  });
+  if (touched === 0) { W.toast('No clear region there — try another spot'); return; }
+  refreshDisplay();
+  W.toast(`Guided ${mode}: region applied (undoable)`);
+}
+
 // ---------- install overrides ----------
 
 W.loadFile = realLoadFile;
@@ -580,6 +1002,7 @@ W.setCompare = realCompare;
 W.runExport = realExport;
 installStrokeCapture();
 syncStrokeButtons();
+installRefineCapture();
 
 $('#btnRecompute').addEventListener('click', () => { void rerun(); });
 function syncUndoRedo() {
@@ -592,13 +1015,13 @@ function syncUndoRedo() {
 // brush-level ops arrive with Stage 3.
 ($('#btnUndo') as HTMLButtonElement).onclick = () => {
   if (!state.mask) return;
-  const label = state.log.undo(state.mask);
+  const label = state.log.undo();
   if (label) { refreshDisplay(); W.toast(`Undone: ${label}`); }
   syncUndoRedo();
 };
 ($('#btnRedo') as HTMLButtonElement).onclick = () => {
   if (!state.mask) return;
-  const label = state.log.redo(state.mask);
+  const label = state.log.redo();
   if (label) { refreshDisplay(); W.toast(`Redone: ${label}`); }
   syncUndoRedo();
 };

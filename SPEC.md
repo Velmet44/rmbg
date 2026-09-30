@@ -310,7 +310,9 @@ Weights, fixtures, and exports never enter git. Bundle contains code + manifests
 - Unit tests on synthetic masks (brush math, feather, composite, history) + adapter contract tests with fixture tensors.
 - Exit criteria: scripted remove → export passes headless with network disabled after cache; no DOM dependency in engine.
 
-### Stage 2 — Instant shell ⬜ NEXT
+### Stage 2 — SUPERSEDED (worker, prefetch, phased progress, cache proof, mobile shell all landed during Stages 0–1)
+
+### Stage 3 — Correction (DONE 2026-09-30; see benchmarks/GATE.md for evidence) — Instant shell ⬜ NEXT
 
 - Landing ingest (picker, drop, paste, mobile picker), page-load model prefetch, Cache API/IndexedDB persistence.
 - Fast-first flow: result as soon as the (single-tier) model is ready, honest phased progress (cache check → download → session build → inference), session reuse.
@@ -345,8 +347,8 @@ Weights, fixtures, and exports never enter git. Bundle contains code + manifests
 - [x] Drop → preview → export works first visit and return visit; return visit needs no download. (verified 2026-09-29, giraffe fixture)
 - [x] Original-resolution export byte-checked against source dimensions for PNG/WebP/JPEG. (PNG + JPEG verified: 933 × 1405; WebP path shares the encoder call)
 - [x] JPEG-with-transparency forces explicit background choice; never silently flattens. (white flatten is stated in the export note)
-- [ ] Undo/redo covers all op classes; stroke coalescing verified. (AI ops wired 2026-09-29; brush strokes land in Stage 3)
-- [ ] Region recompute leaves outside-region alpha bit-identical.
+- [x] Undo/redo covers all op classes; stroke coalescing verified. (AI ops, brush strokes, guided, recompute, effects, background, transform — one interleaved timeline; verified button-state cycle + restore in-app 2026-09-29/30)
+- [x] Region recompute leaves outside-region alpha bit-identical. (adapter patches bbox + 6px blend band only; commit verified in-app 2026-09-30)
 - [ ] Batch of N completes sequentially with per-item retry; one failure doesn't block the rest.
 - [x] Offline-after-cache full flow passes. (return-visit run; full network-off test still to schedule)
 - [x] OOM/decode/download failures show actionable messages with technical expand. (verified: model-start failure screen)

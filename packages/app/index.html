@@ -585,13 +585,15 @@
             </div>
             <div id="bgImageBox" class="hidden">
               <button class="mini" id="btnBgUpload">Upload background</button>
-              <p class="tip">…or drop an image anywhere on the canvas.</p>
+              <p class="tip">Stays on this device; subject controls appear above.</p>
             </div>
           </div>
           <div class="card hidden" id="subjectCard">
             <h4>Subject</h4>
             <div class="slider-row"><label>Scale <b id="subScaleV">100%</b></label><input type="range" id="subScale" min="20" max="200" value="100"></div>
             <div class="slider-row"><label>Rotation <b id="subRotV">0°</b></label><input type="range" id="subRot" min="-45" max="45" value="0"></div>
+            <div class="slider-row"><label>Position X <b id="subXV">0%</b></label><input type="range" id="subX" min="-40" max="40" value="0"></div>
+            <div class="slider-row"><label>Position Y <b id="subYV">0%</b></label><input type="range" id="subY" min="-40" max="40" value="0"></div>
             <div class="row" style="margin-top:10px"><button class="btn small ghost" id="btnSubReset">Reset</button></div>
           </div>
           <div class="card hidden" id="jpegWarn">
@@ -902,7 +904,7 @@ stage.addEventListener("pointerdown",e=>{
   }
   if(pointers.size>2)return;
   if(brushMode&&e.button===0&&!spaceDown){painting=true;paintDot(e);return;}
-  if(e.button===1||spaceDown||!brushMode||e.pointerType==="touch"){panning=true;sx=e.clientX;sy=e.clientY;ox=panX;oy=panY;stage.classList.add("panning");}
+  if((e.button===1||spaceDown||!brushMode||e.pointerType==="touch")&&!window.__rmbgNoPan){panning=true;sx=e.clientX;sy=e.clientY;ox=panX;oy=panY;stage.classList.add("panning");}
 });
 stage.addEventListener("pointermove",e=>{
   if(pointers.has(e.pointerId))pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
