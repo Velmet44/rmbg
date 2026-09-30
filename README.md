@@ -1,50 +1,64 @@
-# rmbg
+# RMBG — background removal on your device
 
-Free, open-source, local-first image background remover. No account, no credits, original-resolution export.
+**Free · Open-source (MIT) · No account · No credits · No resolution cap · No upload.**
 
-Processing runs entirely on your device (Transformers.js + ONNX, WebGPU with WASM fallback). The model downloads once into the browser cache; images never leave the machine.
+Drop a photo, get a professional cutout. Everything runs locally in your
+browser (WebGPU with CPU fallback) — your images never leave the machine.
 
-See [AGENTS.md](AGENTS.md) for the working map and [SPEC.md](SPEC.md) for the product/engineering spec.
+**Try it now: https://velmet44.github.io/rmbg**
 
-## Getting started
+| Before | After |
+|---|---|
+| ![Original photo](docs/images/before.jpg) | ![Cutout with transparent background](docs/images/after.png) |
 
-Prerequisites: Node.js 20+ and npm.
+*Real output from the app: giraffes isolated at full resolution, transparent PNG.*
+
+## Use it
+
+1. Open the link above (desktop or mobile).
+2. Drop an image — the AI model downloads once (~98 MB), then lives in your browser cache.
+3. Inspect (before/after, split view, mask), refine if needed, Export PNG/WebP/JPEG.
+
+Reloads skip the download entirely and work offline.
+
+## What works today
+
+- Single-image flow: upload → remove → inspect → correct → export
+- Erase/restore brushes (Apply commits, Clear discards), guided click-to-region, drag-a-box AI recompute
+- Backgrounds: transparent, solid color, custom image — with subject scale/rotation/position
+- Finishing: drop shadow, edge feather + defringe
+- One undo timeline across AI, brushes, and settings
+- Original-resolution export; JPEG transparency guard (never silently flattened)
+
+## Roadmap
+
+Custom export resolution, batch queue, guided-selection model upgrade,
+self-hosted weights, Web Worker tuning. See [SPEC.md](SPEC.md) for the plan
+and [benchmarks/GATE.md](benchmarks/GATE.md) for measured gate evidence.
+
+## How it works
+
+- Segmentation: BiRefNet-lite 512px ONNX (MIT), via Transformers.js — WebGPU fp16, WASM fallback
+- Masks are float alpha (hair and semi-transparency survive); the original pixels are never mutated
+- One swappable `SegmentationAdapter`; the engine is pure TypeScript with 29 unit tests
+- No backend, no analytics, no tracking — static hosting only ([ARCHITECTURE](SPEC.md#4-engine-architecture))
+
+Model provenance (revisions, licenses, checksums): [models/manifest.json](models/manifest.json).
+
+## Develop
+
+Requires Node.js 20+.
 
 ```sh
 npm install
-```
-
-Run the app (dev):
-
-```sh
-cd packages/app
-npx vite
-```
-
-Wired in Stage 1 (real, local): ingest (picker/drop/paste), fast remove,
-inspect (before/after/split/mask, zoom/pan), PNG/WebP/JPEG export at
-original resolution.
-Wired in Stage 3: erase/restore brushes with Apply, guided click-to-region,
-region recompute, background (transparent/color/image) + subject transform,
-shadow, feather, defringe — all undoable through one history.
-Still shell: custom resolution, batch.
-
-Or serve the production build with the untracked local helper:
-
-```sh
-./serve.bat   # builds if needed, serves http://localhost:8901/
-```
-
-## Verify
-
-```sh
-npm test --workspace @rmbg/engine   # engine unit tests (21, DOM-free)
+npm test --workspace @rmbg/engine   # 29 unit tests, DOM-free
+cd packages/app && npx vite         # dev server
+./serve.bat                         # build + serve production (localhost:8901)
 npm run measure --workspace @rmbg/harness -- --model=studioludens/birefnet-lite-512 --device=webgpu
 ```
 
-Stage 0 gate record: [benchmarks/GATE.md](benchmarks/GATE.md) (license audit,
-manifest pins, engine tests, real-weights smoke + in-browser numbers).
-
 ## License
 
-MIT — see [LICENSE](LICENSE). Model weights carry their own licenses, recorded in [models/manifest.json](models/manifest.json) (see [models/LICENSE-AUDIT.md](models/LICENSE-AUDIT.md)). RMBG-family weights are non-commercial and BYOM-only.
+MIT — see [LICENSE](LICENSE). Third-party model weights retain their own
+licenses, recorded in [models/manifest.json](models/manifest.json) and
+[models/LICENSE-AUDIT.md](models/LICENSE-AUDIT.md).
