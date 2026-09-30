@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 <title>RMBG — Remove backgrounds on your device</title>
 <link rel="icon" href="data:," />
 <style>
@@ -20,7 +20,7 @@
   html,body{height:100%}
   body{background:var(--bg);color:var(--text);font-family:var(--font);font-size:14px;overflow:hidden;
     -webkit-font-smoothing:antialiased}
-  button{font-family:inherit;cursor:pointer}
+  button{font-family:inherit;cursor:pointer;touch-action:manipulation}
   :focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
 
   /* ---------- generic ---------- */
@@ -125,7 +125,8 @@
   /* canvas */
   .stage-wrap{flex:1;min-width:0;display:flex;flex-direction:column;background:#08090b;position:relative}
   .stage{flex:1;min-height:0;position:relative;overflow:hidden;cursor:grab;
-    background:radial-gradient(1000px 600px at 50% 40%,#10141a,#08090b)}
+    background:radial-gradient(1000px 600px at 50% 40%,#10141a,#08090b);
+    touch-action:none; /* all gestures handled manually (paint/pan/pinch) */}
   .stage.panning{cursor:grabbing}
   .stage.brushing{cursor:none}
   #viewport{position:absolute;left:50%;top:50%;transform-origin:center center}
@@ -336,6 +337,13 @@
     #zoomLbl{min-width:40px}
     #mobileNav{display:flex;flex:0 0 56px;background:var(--bg2);border-top:1px solid var(--border);
       z-index:35}
+  .topbar{padding-left:calc(12px + env(safe-area-inset-left));padding-right:calc(12px + env(safe-area-inset-right));padding-top:env(safe-area-inset-top)}
+  .statusbar{padding-left:calc(12px + env(safe-area-inset-left));padding-right:calc(12px + env(safe-area-inset-right));padding-bottom:env(safe-area-inset-bottom)}
+  #mobileNav{padding-bottom:env(safe-area-inset-bottom)}
+  .ctx{padding-bottom:calc(24px + env(safe-area-inset-bottom))}
+  .dropzone .small{font-size:12px;line-height:1.6;padding:0 4px}
+  .dropzone{padding:36px 16px}
+  .hero-title{overflow-wrap:break-word}
     #mobileNav button{flex:1;background:none;border:0;color:var(--muted);font-size:10px;font-weight:700;
       display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
       letter-spacing:.02em}
@@ -857,7 +865,9 @@ $("#cellSize").oninput=e=>{$("#cellV").textContent=e.target.value+"px"; $("#chec
 function updSub(){$("#subScaleV").textContent=$("#subScale").value+"%";$("#subRotV").textContent=$("#subRot").value+"°";}
 /* canvas zoom / pan */
 const stage=$("#stage"), viewport=$("#viewport"), checker=$("#checker");
-let zoom=1, panX=0, panY=0, panning=false, spaceDown=false, sx=0, sy=0, ox=0, oy=0;
+let zoom=1, panX=0, panY=0, panning=false, painting=false, spaceDown=false, sx=0, sy=0, ox=0, oy=0;
+const pointers=new Map();
+let pinchD0=0, pinchZoom0=1, pinchMX=0, pinchMY=0, pinchPX=0, pinchPY=0;
 function applyT(){viewport.style.transform=`translate(calc(-50% + ${panX}px), calc(-50% + ${panY}px)) scale(${zoom})`;}
 function fitZoom(announce){
   const r=stage.getBoundingClientRect();
@@ -871,16 +881,42 @@ $("#zoomIn").onclick=()=>setZoom(zoom*1.2);
 $("#zoomOut").onclick=()=>setZoom(zoom/1.2);
 $("#zoomFit").onclick=()=>fitZoom(true);
 stage.addEventListener("wheel",e=>{e.preventDefault(); setZoom(zoom*(e.deltaY<0?1.1:0.9));},{passive:false});
+function ptsMid(){const p=[...pointers.values()];return {x:(p[0].x+p[1].x)/2,y:(p[0].y+p[1].y)/2};}
+function ptsDist(){const p=[...pointers.values()];return Math.hypot(p[0].x-p[1].x,p[0].y-p[1].y);}
 stage.addEventListener("pointerdown",e=>{
-  if(brushMode&&e.button===0&&!spaceDown){paintDot(e); paintMove(e); return;}
-  if(e.button===1||spaceDown||!brushMode){panning=true;sx=e.clientX;sy=e.clientY;ox=panX;oy=panY;stage.classList.add("panning");stage.setPointerCapture(e.pointerId);}
+  try{stage.setPointerCapture(e.pointerId);}catch(_){}
+  pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  if(pointers.size===2){
+    // Two fingers: pinch zoom + pan, whatever the active tool.
+    painting=false;panning=false;stage.classList.remove("panning");
+    pinchD0=Math.max(1,ptsDist());pinchZoom0=zoom;
+    const m=ptsMid();pinchMX=m.x;pinchMY=m.y;pinchPX=panX;pinchPY=panY;
+    hideBrushRing();return;
+  }
+  if(pointers.size>2)return;
+  if(brushMode&&e.button===0&&!spaceDown){painting=true;paintDot(e);return;}
+  if(e.button===1||spaceDown||!brushMode||e.pointerType==="touch"){panning=true;sx=e.clientX;sy=e.clientY;ox=panX;oy=panY;stage.classList.add("panning");}
 });
 stage.addEventListener("pointermove",e=>{
+  if(pointers.has(e.pointerId))pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
   moveRing(e);
+  if(pointers.size===2){
+    const m=ptsMid();
+    setZoom(pinchZoom0*Math.max(.2,ptsDist()/pinchD0));
+    panX=pinchPX+(m.x-pinchMX);panY=pinchPY+(m.y-pinchMY);applyT();
+    return;
+  }
+  if(painting&&pointers.size===1){paintDot(e);return;}
   if(panning){panX=ox+(e.clientX-sx);panY=oy+(e.clientY-sy);applyT();}
-  else if(brushMode&&e.buttons===1&&!spaceDown)paintDot(e);
 });
-stage.addEventListener("pointerup",()=>{panning=false;stage.classList.remove("panning");});
+function endPointer(e){
+  pointers.delete(e.pointerId);
+  if(pointers.size<2){/* pinch over */}
+  if(pointers.size===0){painting=false;panning=false;stage.classList.remove("panning");}
+  else if(pointers.size===1){panning=false;stage.classList.remove("panning");}
+}
+stage.addEventListener("pointerup",endPointer);
+stage.addEventListener("pointercancel",endPointer);
 stage.addEventListener("dblclick",()=>fitZoom(true));
 document.addEventListener("keydown",e=>{if(e.code==="Space"&&$("#view-editor").classList.contains("on")){spaceDown=true;e.preventDefault();}});
 document.addEventListener("keyup",e=>{if(e.code==="Space")spaceDown=false;});
