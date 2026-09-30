@@ -156,13 +156,14 @@ function fmtMB(n: number): string {
   return n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.round(n / 1024)} KB`;
 }
 
-/** True cache check: look for our model files in the Cache API instead of
- *  guessing from event timing. */
+/** True cache check: the WEIGHTS file must be present, not just configs.
+ *  (A partial cache — config.json without the ~100 MB onnx — must read as
+ *  a miss, or the UI claims "cached" and then stalls with no byte events.) */
 async function isModelCached(): Promise<boolean> {
   try {
     const cache = await caches.open('transformers-cache');
     const keys = await cache.keys();
-    return keys.some((r) => r.url.includes('birefnet-lite-512'));
+    return keys.some((r) => /birefnet-lite-512.*\.onnx/i.test(r.url));
   } catch {
     return false; // Cache API unavailable (private mode etc.) → assume miss
   }
