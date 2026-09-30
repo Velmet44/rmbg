@@ -9,9 +9,9 @@ browser (WebGPU with CPU fallback) — your images never leave the machine.
 
 | Before | After |
 |---|---|
-| ![Original photo](docs/images/before.jpg) | ![Cutout with transparent background](docs/images/after.png) |
+| ![Original photo: golden retriever in a busy park](docs/images/sample-before.png) | ![Cutout with transparent background](docs/images/sample-after.png) |
 
-*Real output from the app: giraffes isolated at full resolution, transparent PNG.*
+*Real output from the app: busy park background removed, fur edges intact, transparent PNG.*
 
 ## Use it
 
