@@ -38,6 +38,8 @@ export class TransformersAdapter implements SegmentationAdapter {
       device?: TransformersDevice;
       dtype?: string;
       runtimeUrl?: string;
+      /** Pinned HF revision: skips latest-manifest resolution (fewer roundtrips). */
+      revision?: string;
       /** Injected runtime loader (tests). Defaults to the pinned CDN ESM. */
       loadRuntime?: (url: string) => Promise<any>;
     } = {},
@@ -68,9 +70,14 @@ export class TransformersAdapter implements SegmentationAdapter {
   }
 
   private async doInit(progress?: (p: ModelProgress) => void): Promise<void> {
-    const { pipeline, RawImage } = await this.runtime();
-    this.RawImageCtor = RawImage;
     const want = this.opts.device ?? 'auto';
+    // Overlap startup: runtime JS fetch and GPU probe run concurrently
+    // instead of serially (saves the probe latency on every load, up to ~3s
+    // when the GPU process is still starting and the probe retries once).
+    const runtimeP = this.runtime();
+    const probeP = want === 'auto' ? probeGPU() : Promise.resolve(null);
+    const { pipeline, RawImage } = await runtimeP;
+    this.RawImageCtor = RawImage;
     // Never benchmark-or-hang on a software rasterizer: SwiftShader/llvmpipe
     // can grind for tens of minutes instead of failing cleanly. Detect it
     // up front and go straight to WASM (the honest CPU path).
@@ -79,8 +86,8 @@ export class TransformersAdapter implements SegmentationAdapter {
     // hand out a fallback (Basic Render Driver) adapter instead.
     let softwareGPU = false;
     let gpuDesc = 'unknown';
-    if (want === 'auto') {
-      const probe = await probeGPU();
+    const probe = await probeP;
+    if (probe) {
       softwareGPU = probe.software;
       gpuDesc = probe.desc;
       this.gpuDescription = gpuDesc;
@@ -108,6 +115,7 @@ export class TransformersAdapter implements SegmentationAdapter {
           device: attempt.device as any,
           dtype: attempt.dtype as any,
           progress_callback: cb,
+          ...(this.opts.revision ? { revision: this.opts.revision } : {}),
         });
         this.deviceUsed = `${attempt.device}/${attempt.dtype}`;
         return;
@@ -149,6 +157,7 @@ export class TransformersAdapter implements SegmentationAdapter {
         this.seg = await pipeline('image-segmentation', this.modelId, {
           device: 'wasm' as any,
           dtype: 'fp32' as any,
+          ...(this.opts.revision ? { revision: this.opts.revision } : {}),
         });
         this.deviceUsed = 'wasm/fp32-fallback';
         return await this.runOnce(image);
