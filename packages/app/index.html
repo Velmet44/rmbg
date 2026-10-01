@@ -344,14 +344,17 @@
   /* de-slop: subtler hero, calmer hover */
   #view-landing{background:radial-gradient(900px 480px at 50% 18%,rgba(52,211,153,.04),transparent 70%)}
   /* landing footer: full-width band, distinct from page */
-  #landingFoot{position:absolute;left:0;right:0;bottom:0;
-    display:flex;gap:10px;flex-wrap:wrap;justify-content:center;
+  /* Sticky-footer layout: main centers content in leftover space, footer
+     pins to the bottom in normal flow — no overlap, no phantom scroll. */
+  #view-landing{justify-content:flex-start}
+  #landingMain{flex:1 0 auto;width:100%;display:flex;flex-direction:column;
+    align-items:center;justify-content:safe center}
+  #landingFoot{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;
     align-items:center;font-size:12px;color:var(--faint);text-align:center;
     background:var(--bg2);border-top:1px solid var(--border);
-    margin:0;
+    align-self:stretch;
+    margin:26px -24px -24px;
     padding:14px 12px calc(14px + env(safe-area-inset-bottom))}
-  /* Reserve so scrolled-to-end content never hides under the pinned footer. */
-  #view-landing{padding-bottom:120px}
   #landingFoot a{color:var(--muted);text-decoration:none;display:inline-flex;align-items:center;gap:6px}
   #landingFoot a:hover{color:var(--text)}
   #landingFoot svg{width:15px;height:15px;flex:0 0 15px}
@@ -397,6 +400,7 @@
 
 <!-- ============ LANDING ============ -->
 <section class="view on" id="view-landing">
+  <main id="landingMain">
   <div class="brand">RM<span>BG</span></div>
   <div class="hero-title">Remove backgrounds. Keep the subject.</div>
   <div class="hero-sub">Free · Open-source · Runs on your device — no account, no credits</div>
@@ -442,6 +446,7 @@
     <span><b>✓</b>Full-resolution export</span>
     <span><b>✓</b>Runs locally</span>
   </div>
+  </main>
 
   <footer id="landingFoot">
     <a href="https://github.com/Velmet44/rmbg" target="_blank" rel="noopener" aria-label="RMBG on GitHub">
