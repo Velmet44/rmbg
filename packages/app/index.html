@@ -1072,7 +1072,7 @@ stage.addEventListener("pointerdown",e=>{
     hideBrushRing();return;
   }
   if(pointers.size>2)return;
-  if(brushMode&&e.button===0&&!spaceDown){painting=true;paintDot(e);return;}
+  if(brushMode&&e.button===0&&!spaceDown&&!window.__rmbgSplitLock){painting=true;paintDot(e);return;}
   if((e.button===1||spaceDown||!brushMode||e.pointerType==="touch")&&!window.__rmbgNoPan){panning=true;sx=e.clientX;sy=e.clientY;ox=panX;oy=panY;stage.classList.add("panning");}
 });
 stage.addEventListener("pointermove",e=>{
@@ -1084,7 +1084,7 @@ stage.addEventListener("pointermove",e=>{
     panX=pinchPX+(m.x-pinchMX);panY=pinchPY+(m.y-pinchMY);applyT();
     return;
   }
-  if(painting&&pointers.size===1){paintDot(e);return;}
+  if(painting&&!window.__rmbgSplitLock&&pointers.size===1){paintDot(e);return;}
   if(panning){panX=ox+(e.clientX-sx);panY=oy+(e.clientY-sy);applyT();}
 });
 function endPointer(e){
@@ -1140,7 +1140,7 @@ function paintDot(e){
 }
 function paintMove(e){/* stroke coalescing is engine-side; mock logs per stroke */}
 function moveRing(e){
-  if(!brushMode||spaceDown){ring.style.display="none";return;}
+  if(!brushMode||spaceDown||window.__rmbgSplitLock){ring.style.display="none";return;}
   const s=+$("#brushSize").value*(e.shiftKey?.5:1);
   ring.style.display="block";ring.style.width=ring.style.height=s+"px";
   ring.style.left=e.clientX+"px";ring.style.top=e.clientY+"px";

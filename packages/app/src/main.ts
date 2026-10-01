@@ -378,19 +378,30 @@ function ensureSplit(img: ImageRef) {
     const rHalf = mk('splitRC', 'CUTOUT', 'right');
     const div = document.createElement('div');
     div.id = 'splitDiv2';
-    div.style.cssText = 'position:absolute;top:0;bottom:0;width:2px;background:var(--accent);cursor:ew-resize;box-shadow:0 0 12px rgba(52,211,153,.8);z-index:5';
+    // Wide grab zone (14px) with a centered 2px visual line + grip pill.
+    // Drag starts ONLY on the handle — clicks elsewhere on the pane pan/zoom
+    // as usual and never jump the divider.
+    div.style.cssText = 'position:absolute;top:0;bottom:0;width:14px;margin-left:-7px;cursor:ew-resize;z-index:5;touch-action:none';
+    div.innerHTML = '<div style="position:absolute;top:0;bottom:0;left:6px;width:2px;background:var(--accent);box-shadow:0 0 12px rgba(52,211,153,.8)"></div>' +
+      '<div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:var(--accent);color:#06281c;font-size:9px;font-weight:800;border-radius:99px;padding:4px 7px;white-space:nowrap">◂ ▸</div>';
     ui.appendChild(div);
     let dragging = false;
-    const pos = (e: PointerEvent) => {
+    const pos = (clientX: number) => {
       const r = (checker as HTMLElement).getBoundingClientRect();
-      splitPos = Math.max(2, Math.min(98, ((e.clientX - r.left) / r.width) * 100));
+      splitPos = Math.max(2, Math.min(98, ((clientX - r.left) / r.width) * 100));
       rHalf.style.clipPath = `inset(0 0 0 ${splitPos}%)`;
       div.style.left = splitPos + '%';
     };
-    ui.addEventListener('pointerdown', (e) => { dragging = true; (ui as HTMLElement).setPointerCapture?.(e.pointerId); pos(e as PointerEvent); });
-    ui.addEventListener('pointermove', (e) => { if (dragging) pos(e as PointerEvent); });
-    ui.addEventListener('pointerup', () => { dragging = false; });
-    ui.addEventListener('pointercancel', () => { dragging = false; });
+    div.addEventListener('pointerdown', (e) => {
+      dragging = true;
+      try { div.setPointerCapture?.((e as PointerEvent).pointerId); } catch { /* noop */ }
+      pos((e as PointerEvent).clientX);
+      e.stopPropagation(); // must not start paint/pan/guided on the stage below
+    });
+    div.addEventListener('pointermove', (e) => { if (dragging) pos((e as PointerEvent).clientX); });
+    const stop = () => { dragging = false; };
+    div.addEventListener('pointerup', stop);
+    div.addEventListener('pointercancel', stop);
     lc = $('#splitLC') as HTMLCanvasElement;
   }
   // Re-assert clip on rebuild.
@@ -643,9 +654,23 @@ function runReveal() {
   }, 2000);
 }
 
+let splitNoteAt = 0;
+/** Split view is inspect-only: earlier paint stays, but no new marks land.
+ *  Returns true when the caller must stand down. */
+function guardSplit(): boolean {
+  if (lastCompare !== 'split') return false;
+  const now = Date.now();
+  if (now - splitNoteAt > 2500) {
+    splitNoteAt = now;
+    W.toast('Exit Split view to edit');
+  }
+  return true;
+}
+
 function realCompare(m: string) {
   revealToken++;
   lastCompare = m;
+  (W as any).__rmbgSplitLock = (m === 'split');
   ($('#splitUI') as HTMLElement).classList.toggle('on', m === 'split');
   $$('.seg button').forEach((b) => (b as HTMLElement).classList.toggle('on', (b as HTMLElement).dataset.view === m));
   if (!state.mask) { W.toast(m === 'mask' ? 'Mask: white kept · black removed' : 'Original pixels — never destroyed'); return; }
@@ -833,6 +858,7 @@ function installStrokeCapture() {
   const stage = $('#stage') as HTMLElement;
   stage.addEventListener('pointerdown', (e) => {
     if (!brushActive() || (e.button !== 0 && e.pointerType === 'mouse')) return;
+    if (guardSplit()) return;
     const pt = paintPoint(e as PointerEvent);
     if (!pt) return;
     const size = +(( $('#brushSize') as HTMLInputElement)?.value ?? 48);
@@ -1153,20 +1179,23 @@ function installRefineCapture() {
   let anchor: { x: number; y: number } | null = null;
   let downAt: { x: number; y: number } | null = null;
   const boxToClient = (a: { x: number; y: number }, b: { x: number; y: number }) => {
+    // Percentages of the checker box: immune to zoom/pan, unlike screen px.
+    // (Screen px matched only at 100% zoom — every other zoom drew the box
+    // away from the cursor.)
     const img = state.image!;
-    const r = ($('#checker') as HTMLElement).getBoundingClientRect();
     const x0 = Math.min(a.x, b.x), y0 = Math.min(a.y, b.y);
     const x1 = Math.max(a.x, b.x), y1 = Math.max(a.y, b.y);
     const el = boxEl();
     el.style.display = 'block';
-    el.style.left = `${(x0 / img.width) * r.width}px`;
-    el.style.top = `${(y0 / img.height) * r.height}px`;
-    el.style.width = `${((x1 - x0) / img.width) * r.width}px`;
-    el.style.height = `${((y1 - y0) / img.height) * r.height}px`;
+    el.style.left = `${(x0 / img.width) * 100}%`;
+    el.style.top = `${(y0 / img.height) * 100}%`;
+    el.style.width = `${((x1 - x0) / img.width) * 100}%`;
+    el.style.height = `${((y1 - y0) / img.height) * 100}%`;
   };
   stage.addEventListener('pointerdown', (e) => {
     if (!state.mask) return;
     if (refineMode() === 'recompute' && (e.button === 0 || e.pointerType !== 'mouse')) {
+      if (guardSplit()) return;
       const pt = toImageCoords(e as PointerEvent);
       if (pt) { anchor = pt; boxToClient(pt, pt); }
     }
@@ -1202,6 +1231,7 @@ function installRefineCapture() {
     }
     // Guided: a clean click (not a drag) selects + applies a region.
     if (refineMode() === 'guided' && moved < 6 && state.image && state.mask) {
+      if (guardSplit()) return;
       const pt = toImageCoords(e as PointerEvent);
       if (pt) void guidedApply(pt.x, pt.y);
     }
@@ -1221,6 +1251,7 @@ function installRefineCapture() {
 
 async function recomputeApply() {
   if (!state.image || !state.mask) return;
+  if (guardSplit()) return;
   if (!recompBox) { W.toast('Drag a box over the problem area first'); return; }
   const box = { ...recompBox };
   W.runScan('Re-evaluating selection…');
@@ -1250,6 +1281,7 @@ async function recomputeApply() {
 }
 
 async function guidedApply(x: number, y: number) {
+  if (lastCompare === 'split') return; // caller already toasted via guardSplit
   const img = state.image!, mask = state.mask!;
   const mode = guidedMode();
   // Grow on a downsampled copy: texture (spots, grain, fur) averages out so
