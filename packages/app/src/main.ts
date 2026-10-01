@@ -178,20 +178,39 @@ function makeInitProgress() {
   const bytes = new Map<string, { loaded: number; total: number }>();
   let sawDownload = false;
   let finished = false;
+  let lastEventAt = Date.now();
+  let stallNoted = false;
   const draw = () => {
     let l = 0, t = 0;
     for (const f of bytes.values()) { l += f.loaded; t += f.total; }
     if (t > 0) setBar(l / t, `${fmtMB(l)}`, `${fmtMB(t)} · cached after first visit`);
   };
+  // Stall reporter (informational only — never changes state): if bytes were
+  // flowing and then stop for 20 s, say so instead of freezing silently.
+  const stallTimer = setInterval(() => {
+    if (finished || !sawDownload || stallNoted) return;
+    if (Date.now() - lastEventAt > 20000) {
+      stallNoted = true;
+      setBar(0.05, 'download stalled — connection may be slow, still trying…');
+    }
+  }, 5000);
   return {
     onEvent(p: ModelProgress) {
       if (finished) return;
+      lastEventAt = Date.now();
       if (p.status === 'initiate') pendingFiles.add(p.file);
       else if (p.status === 'download') { sawDownload = true; pendingFiles.add(p.file); }
-      else if (p.status === 'progress' && p.total) {
+      else if (p.status === 'progress') {
         sawDownload = true;
-        bytes.set(p.file, { loaded: p.loaded ?? 0, total: p.total });
-        draw();
+        if (p.total) {
+          bytes.set(p.file, { loaded: p.loaded ?? 0, total: p.total });
+          draw();
+        } else {
+          // Chunked response without content-length: show bytes flowing and
+          // keep the bar indeterminate (CSS shimmer) rather than frozen 0%.
+          stallNoted = false;
+          setBar(0.05, `${fmtMB(p.loaded ?? 0)} downloaded…`);
+        }
       } else if (p.status === 'done') {
         pendingFiles.delete(p.file);
         if (sawDownload && pendingFiles.size === 0) {
@@ -200,7 +219,7 @@ function makeInitProgress() {
         }
       }
     },
-    finish() { finished = true; },
+    finish() { finished = true; clearInterval(stallTimer); },
   };
 }
 
