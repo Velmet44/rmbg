@@ -125,6 +125,16 @@ type WorkerProgress = {
 const pending = new Map<number, Pending>();
 worker.onmessage = (e: MessageEvent) => {
   const m = e.data;
+  if (m?.type === 'logline') {
+    const box = $('#prepLogLines') as HTMLElement | null;
+    if (box) {
+      const div = document.createElement('div');
+      div.textContent = m.text;
+      box.appendChild(div);
+      while (box.children.length > 20) box.firstChild?.remove();
+    }
+    return;
+  }
   if (m?.type === 'progress') {
     pending.get(m.id)?.onProgress?.(m);
     return;

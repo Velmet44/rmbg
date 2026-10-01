@@ -12,16 +12,24 @@ let busy = false;
 
 self.onmessage = async (e: MessageEvent) => {
   const msg = e.data;
+  const say = (text: string) => (self as any).postMessage({ type: 'logline', text });
   if (msg?.type === 'init') {
     try {
+      say('init received');
       // The runtime itself (~MBs of JS/WASM) downloads before any model
       // byte can flow; announce it so this phase is never silent.
       (self as any).postMessage({ id: msg.id, type: 'progress', status: 'runtime', file: 'runtime' });
-      await adapter.init((p) =>
-        (self as any).postMessage({ id: msg.id, type: 'progress', ...p }),
-      );
+      let counts: Record<string, number> = {};
+      await adapter.init((p) => {
+        counts[p.status] = (counts[p.status] ?? 0) + 1;
+        const n = Object.values(counts).reduce((a, b) => a + b, 0);
+        if (n === 1 || n % 25 === 1) say(`progress events so far: ${JSON.stringify(counts)}`);
+        (self as any).postMessage({ id: msg.id, type: 'progress', ...p });
+      });
+      say('session ready');
       (self as any).postMessage({ id: msg.id, type: 'ready', backend: adapter.backend });
     } catch (err) {
+      say('init failed: ' + String(err).slice(0, 200));
       (self as any).postMessage({ id: msg.id, type: 'error', message: String(err).slice(0, 300) });
     }
     return;
