@@ -505,6 +505,7 @@ async function realLoadFile(f: File) {
     $('#expDims').textContent = `${ref.width} × ${ref.height} · PNG · transparent`;
     ensureCanvases(ref);
     if (!finishingWired) { wireFinishing(); finishingWired = true; }
+    resetExportRes();
     W.startPreparing(false);
   } catch (e) {
     W.toast(`Could not decode that image: ${String(e)}`, true);
@@ -658,36 +659,117 @@ function selectedFormat(): string {
   return on?.dataset.fmt ?? 'PNG';
 }
 
+/** Export size state. null = original dimensions. */
+let customRes: { w: number; h: number } | null = null;
+let resLocked = true;
+
+function exportSize(): { w: number; h: number; custom: boolean } {
+  if (customRes) return { w: customRes.w, h: customRes.h, custom: true };
+  const img = state.image!;
+  return { w: img.width, h: img.height, custom: false };
+}
+
+function refreshExpDims() {
+  if (!state.image) return;
+  const { w, h } = exportSize();
+  const fmt = selectedFormat();
+  const bg = state.bg.kind === 'transparent' ? 'transparent' : 'with background';
+  $('#expDims').textContent = `${w} × ${h} · ${fmt} · ${bg}${customRes ? ' · custom' : ''}`;
+}
+
+function refreshResNote() {
+  const el = $('#resNote') as HTMLElement | null;
+  if (!el || !state.image || !customRes) return;
+  const { w, h } = customRes;
+  const same = w === state.image.width && h === state.image.height;
+  const pct = Math.round((100 * w) / state.image.width);
+  const dir = same ? 'same as original'
+    : pct < 100 ? `${pct}% — downscale, stays sharp` : `${pct}% — upscale, may soften`;
+  const stretched = !resLocked
+    && Math.abs(w / h - state.image.width / state.image.height) > 0.01;
+  el.textContent = `${w} × ${h} · ${dir}${stretched ? ' · aspect stretched' : ''}`;
+}
+
+function resetExportRes() {
+  customRes = null;
+  resLocked = true;
+  ($('#resOrig') as HTMLElement)?.classList.add('on');
+  ($('#resCustom') as HTMLElement)?.classList.remove('on');
+  ($('#resCustomBox') as HTMLElement)?.classList.add('hidden');
+  const l = $('#resLock') as HTMLElement | null;
+  if (l) l.textContent = 'Aspect locked';
+  refreshExpDims();
+}
+
+/** AVIF encode support varies by browser/runtime — detect, never assume. */
+let avifCache: boolean | null = null;
+async function avifSupported(): Promise<boolean> {
+  if (avifCache !== null) return avifCache;
+  try {
+    const c = document.createElement('canvas');
+    c.width = c.height = 8;
+    avifCache = c.toDataURL('image/avif').startsWith('data:image/avif');
+  } catch {
+    avifCache = false;
+  }
+  return avifCache;
+}
+
+/** Full-res composite, then a single high-quality resample to export size. */
+function exportCanvas(view: { image: ImageRef; mask: AlphaMask }, bg: Background, fx: Effects, w: number, h: number): HTMLCanvasElement {
+  const full = document.createElement('canvas');
+  drawComposite(full, view, bg, fx);
+  if (full.width === w && full.height === h) return full;
+  const out = document.createElement('canvas');
+  out.width = w; out.height = h;
+  const ctx = out.getContext('2d')!;
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(full, 0, 0, w, h);
+  return out;
+}
+
 async function realExport() {
   if (!state.image || !state.mask || !resultCanvas) { W.toast('Nothing to export yet', true); return; }
-  const fmt = selectedFormat();
+  let fmt = selectedFormat();
+  if (fmt === 'AVIF' && !(await avifSupported())) {
+    W.toast('AVIF not supported in this browser — exporting PNG instead', true);
+    fmt = 'PNG';
+  }
   ($('#btnDoExport') as HTMLElement).textContent = `Export ${fmt}`;
   const wrap = $('#expProgWrap') as HTMLElement;
   wrap.classList.remove('hidden');
   ($('#expBar') as HTMLElement).style.width = '15%';
   try {
     const view = derivedView();
-    let canvas = resultCanvas;
-    let note = `${state.image.width} × ${state.image.height} · ${fmt}`;
-    if (fmt === 'JPEG' && state.bg.kind === 'transparent') {
+    const size = exportSize();
+    let bg = state.bg;
+    let note = `${size.w} × ${size.h} · ${fmt}`;
+    if (fmt === 'JPEG' && bg.kind === 'transparent') {
       // JPEG cannot carry transparency: composite onto white for this export
       // only (stated, never silent), without touching the stored mask.
-      const tmp = document.createElement('canvas');
-      drawComposite(tmp, view, { kind: 'color', color: [255, 255, 255] }, state.fx);
-      canvas = tmp;
+      bg = { kind: 'color', color: [255, 255, 255] };
       note += ' · flattened onto white (JPEG has no transparency)';
     } else {
-      drawComposite(resultCanvas, view, state.bg, state.fx);
-      note += state.bg.kind === 'transparent' ? ' · transparent' : ' · with background';
+      note += bg.kind === 'transparent' ? ' · transparent' : ' · with background';
     }
+    if (size.custom && state.image) {
+      const pct = Math.round((100 * size.w) / state.image.width);
+      note += pct === 100 ? ' · custom size' : pct < 100 ? ` · downscaled to ${pct}%` : ` · upscaled to ${pct}%`;
+    }
+    const canvas = exportCanvas(view, bg, state.fx, size.w, size.h);
     ($('#expBar') as HTMLElement).style.width = '60%';
-    const mime = fmt === 'PNG' ? 'image/png' : fmt === 'WebP' ? 'image/webp' : 'image/jpeg';
-    const blob: Blob | null = await new Promise((res) => canvas.toBlob(res, mime, 0.92));
+    const mime = fmt === 'PNG' ? 'image/png'
+      : fmt === 'WebP' ? 'image/webp'
+      : fmt === 'AVIF' ? 'image/avif' : 'image/jpeg';
+    const quality = fmt === 'AVIF' ? 0.85 : 0.92;
+    const blob: Blob | null = await new Promise((res) => canvas.toBlob(res, mime, quality));
     if (!blob) throw new Error('encoder returned nothing');
     ($('#expBar') as HTMLElement).style.width = '100%';
+    const ext = fmt === 'PNG' ? 'png' : fmt === 'WebP' ? 'webp' : fmt === 'AVIF' ? 'avif' : 'jpg';
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `rmbg-export.${fmt.toLowerCase()}`;
+    a.download = `rmbg-export-${size.w}x${size.h}.${ext}`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 5000);
     $('#expNote').textContent = `Done: ${a.download} · ${(blob.size / 1048576).toFixed(2)} MB · ${note}`;
@@ -859,9 +941,7 @@ function syncFxControls() {
     ($('#bgHex') as HTMLElement).textContent = hex.toUpperCase();
     $$('.sw').forEach((s) => (s as HTMLElement).classList.toggle('on', (s as HTMLElement).dataset.c === hex));
   }
-  const fmt = selectedFormat();
-  $('#expDims').textContent =
-    `${state.image.width} × ${state.image.height} · ${fmt} · ${state.bg.kind === 'transparent' ? 'transparent' : 'with background'}`;
+  refreshExpDims();
 }
 
 function bindFxSlider(id: string, label: string, set: (v: number) => void, fmt: (v: number) => string) {
@@ -950,6 +1030,57 @@ function wireFinishing() {
   bindFxSlider('subY', 'subject position', (v) => { state.tr.dy = (v / 100) * img().height; }, pct);
   ($('#btnSubReset') as HTMLButtonElement)?.addEventListener('click', () => {
     commitFx('subject reset', () => { state.tr = { scale: 1, rotation: 0, dx: 0, dy: 0 }; });
+  });
+  // Export resolution radios (static drawer elements — bound once via the
+  // finishingWired guard like the rest of this function).
+  const resOrig = $('#resOrig') as HTMLElement;
+  const resCustom = $('#resCustom') as HTMLElement;
+  const resBox = $('#resCustomBox') as HTMLElement;
+  resOrig.addEventListener('click', () => {
+    customRes = null;
+    resOrig.classList.add('on');
+    resCustom.classList.remove('on');
+    resBox.classList.add('hidden');
+    refreshExpDims();
+  });
+  resCustom.addEventListener('click', () => {
+    if (!state.image) return;
+    if (!customRes) customRes = { w: state.image.width, h: state.image.height };
+    num('resW').value = String(customRes.w);
+    num('resH').value = String(customRes.h);
+    resCustom.classList.add('on');
+    resOrig.classList.remove('on');
+    resBox.classList.remove('hidden');
+    refreshResNote();
+    refreshExpDims();
+  });
+  const onResInput = (which: 'w' | 'h') => {
+    if (!state.image || !customRes) return;
+    const rawW = num('resW').value, rawH = num('resH').value;
+    if (!rawW || !rawH) return;
+    let w = Math.max(1, Math.min(8192, Math.round(+rawW)));
+    let h = Math.max(1, Math.min(8192, Math.round(+rawH)));
+    if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) return;
+    if (resLocked) {
+      const r = state.image.width / state.image.height;
+      if (which === 'w') {
+        h = Math.max(1, Math.round(w / r));
+        num('resH').value = String(h);
+      } else {
+        w = Math.max(1, Math.round(h * r));
+        num('resW').value = String(w);
+      }
+    }
+    customRes = { w, h };
+    refreshResNote();
+    refreshExpDims();
+  };
+  num('resW').addEventListener('input', () => onResInput('w'));
+  num('resH').addEventListener('input', () => onResInput('h'));
+  ($('#resLock') as HTMLButtonElement).addEventListener('click', (e) => {
+    resLocked = !resLocked;
+    (e.currentTarget as HTMLButtonElement).textContent = resLocked ? 'Aspect locked' : 'Aspect free';
+    refreshResNote();
   });
   syncFxControls();
 }
@@ -1358,6 +1489,7 @@ function openBatchItem(it: BatchItem) {
   $('#expDims').textContent = `${it.image.width} × ${it.image.height} · PNG · transparent`;
   ensureCanvases(it.image);
   if (!finishingWired) { wireFinishing(); finishingWired = true; }
+  resetExportRes();
   if (state.mask) state.log.commitRegion(state.mask, 'batch', () => null);
   W.showView('view-editor');
   if (state.mask) {
@@ -1598,6 +1730,16 @@ installStrokeCapture();
 syncStrokeButtons();
 installRefineCapture();
 void paintStars();
+// Grey out AVIF up front on browsers without an encoder (never silently
+// encode the wrong format — realExport also guards at click time).
+void avifSupported().then((ok) => {
+  if (ok) return;
+  const b = document.querySelector('.fmt[data-fmt="AVIF"]') as HTMLButtonElement | null;
+  if (b) {
+    b.disabled = true;
+    b.title = 'AVIF encoding is not supported in this browser';
+  }
+});
 // Feed the diagnostics buffer from every app toast + uncaught error.
 // (Mock shell toasts bypass this — only real-flow messages are collected.)
 {
