@@ -5,8 +5,7 @@
 // Everything runs on-device: model bytes go to the browser cache once,
 // image pixels never leave. Single model tier (fast).
 //
-// Not yet wired (later stages, UI toasts as such): refine brushes affect only
-// a visual overlay layer, background/effects panels, custom resolution, batch.
+// Not yet wired: custom export resolution.
 
 import {
   OpLog,
@@ -500,7 +499,7 @@ async function realLoadFile(f: File) {
     $('#dimLbl').textContent = `${ref.width} × ${ref.height}`;
     $('#expDims').textContent = `${ref.width} × ${ref.height} · PNG · transparent`;
     ensureCanvases(ref);
-    wireFinishing();
+    if (!finishingWired) { wireFinishing(); finishingWired = true; }
     W.startPreparing(false);
   } catch (e) {
     W.toast(`Could not decode that image: ${String(e)}`, true);
@@ -1156,6 +1155,348 @@ async function guidedApply(x: number, y: number) {
   W.toast(`Guided ${mode}: region applied (undoable)`);
 }
 
+// ---------- batch queue (Stage 4) ----------
+// Sequential job queue over the same worker: queued → processing →
+// done/failed per item, overall progress, per-item retry. One inference
+// session, never parallel (memory-bound). Failures export independently.
+
+interface BatchItem {
+  id: string;
+  name: string;
+  image: ImageRef;
+  thumb: string;
+  status: 'queued' | 'run' | 'done' | 'err';
+  err?: string;
+  mask?: AlphaMask;
+}
+
+const batch: BatchItem[] = [];
+let batchPumping = false;
+let batchBusy = false;
+let batchSeq = 0;
+const BATCH_MAX = 24;
+let finishingWired = false;
+
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
+}
+
+function stem(name: string): string {
+  const base = name.replace(/\.[a-z0-9]+$/i, '').replace(/[/\\?%*:|"<>]/g, '_').trim();
+  return base || 'cutout';
+}
+
+/** Downscaled JPEG data-URL for the grid (never the full RGB). */
+function thumbURL(img: ImageRef): string {
+  const s = Math.min(1, 320 / Math.max(img.width, img.height));
+  const w = Math.max(1, Math.round(img.width * s)), h = Math.max(1, Math.round(img.height * s));
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  const ctx = c.getContext('2d')!;
+  const id = ctx.createImageData(w, h);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const sx = Math.min(img.width - 1, ((x / w) * img.width) | 0);
+      const sy = Math.min(img.height - 1, ((y / h) * img.height) | 0);
+      const si = sy * img.width + sx, di = y * w + x;
+      id.data[di * 4] = img.rgb[si * 3];
+      id.data[di * 4 + 1] = img.rgb[si * 3 + 1];
+      id.data[di * 4 + 2] = img.rgb[si * 3 + 2];
+      id.data[di * 4 + 3] = 255;
+    }
+  }
+  ctx.putImageData(id, 0, 0);
+  return c.toDataURL('image/jpeg', 0.7);
+}
+
+function rgbToObjectURL(img: ImageRef): string {
+  const c = document.createElement('canvas');
+  c.width = img.width; c.height = img.height;
+  const ctx = c.getContext('2d')!;
+  const id = ctx.createImageData(img.width, img.height);
+  for (let i = 0; i < img.width * img.height; i++) {
+    id.data[i * 4] = img.rgb[i * 3];
+    id.data[i * 4 + 1] = img.rgb[i * 3 + 1];
+    id.data[i * 4 + 2] = img.rgb[i * 3 + 2];
+    id.data[i * 4 + 3] = 255;
+  }
+  ctx.putImageData(id, 0, 0);
+  return c.toDataURL('image/png');
+}
+
+function renderBatch() {
+  const g = $('#batchGrid') as HTMLElement;
+  g.innerHTML = '';
+  let done = 0;
+  batch.forEach((it) => {
+    if (it.status === 'done') done++;
+    const badge = it.status === 'done' ? ['ok', '✓']
+      : it.status === 'run' ? ['run', '…']
+      : it.status === 'err' ? ['err', 'failed'] : ['wait', 'queued'];
+    const d = document.createElement('div');
+    d.className = 'bthumb';
+    d.title = it.status === 'err' ? (it.err ?? 'failed') : it.name;
+    d.innerHTML = `<div class="im"><img src="${it.thumb}" alt="" style="width:100%;height:100%;object-fit:cover;display:block"/>` +
+      `<span class="badge ${badge[0]}" style="position:absolute;top:8px;left:8px">${badge[1]}</span></div>` +
+      `<div class="meta"><span>${escapeHtml(it.name)}</span><span>${it.image.width}×${it.image.height}</span></div>` +
+      `<div class="bar"><i style="width:${it.status === 'done' ? 100 : 0}%"></i></div>`;
+    d.addEventListener('click', () => openBatchItem(it));
+    if (it.status === 'err' || it.status === 'done') {
+      const acts = document.createElement('div');
+      acts.style.cssText = 'display:flex;gap:6px;padding:0 10px 10px';
+      const b = document.createElement('button');
+      b.className = 'btn small ghost';
+      b.style.cssText = 'flex:1;justify-content:center';
+      if (it.status === 'err') {
+        b.textContent = 'Retry';
+        b.addEventListener('click', (e) => {
+          e.stopPropagation();
+          it.status = 'queued'; delete it.err;
+          renderBatch();
+          void pumpBatch();
+        });
+      } else {
+        b.textContent = 'PNG ↓';
+        b.addEventListener('click', (e) => {
+          e.stopPropagation();
+          void downloadItemPNG(it);
+        });
+      }
+      acts.appendChild(b);
+      d.appendChild(acts);
+    }
+    g.appendChild(d);
+  });
+  $('#batchCount').textContent = `${done} / ${batch.length}`;
+}
+
+/** Strictly sequential: one worker, one inference at a time. */
+async function pumpBatch(): Promise<void> {
+  if (batchPumping) return;
+  if (!batch.some((b) => b.status === 'queued')) return;
+  batchPumping = true;
+  try {
+    $('#batchCount').textContent = 'loading model…';
+    try {
+      await ensureReady();
+    } catch (e) {
+      W.toast(`Model start failed: ${String(e).slice(0, 120)}`, true);
+      return;
+    }
+    for (const it of batch) {
+      if (it.status !== 'queued') continue;
+      if (!($('#view-batch') as HTMLElement).classList.contains('on')) break; // paused: user left
+      it.status = 'run';
+      renderBatch();
+      batchBusy = true;
+      try {
+        const copy = new Uint8ClampedArray(it.image.rgb);
+        const res = await callWorker(
+          { type: 'segment', imageId: it.image.id, w: it.image.width, h: it.image.height, rgb: copy.buffer },
+          [copy.buffer],
+        );
+        it.mask = { width: res.w, height: res.h, alpha: new Float32Array(res.alpha) };
+        it.status = 'done';
+        delete it.err;
+      } catch (e) {
+        // One failure never blocks the rest of the queue.
+        it.status = 'err';
+        it.err = String(e).slice(0, 140);
+      } finally {
+        batchBusy = false;
+      }
+      renderBatch();
+    }
+  } finally {
+    batchPumping = false;
+    batchBusy = false;
+    renderBatch();
+  }
+}
+
+async function addBatchFiles(fs: FileList | File[]): Promise<void> {
+  const list = [...fs].filter((f) => f.type.startsWith('image/'));
+  if (list.length === 0) { W.toast('No image files', true); return; }
+  for (const f of list) {
+    if (batch.length >= BATCH_MAX) { W.toast(`Batch capped at ${BATCH_MAX} images`, true); break; }
+    try {
+      const ref = await decodeToImageRef(f, f.name || `img-${++batchSeq}`);
+      batch.push({
+        id: `${Date.now()}-${batchSeq++}`, name: f.name || 'image',
+        image: ref, thumb: thumbURL(ref), status: 'queued',
+      });
+    } catch {
+      W.toast(`Could not decode ${f.name}`, true);
+    }
+  }
+  renderBatch();
+  void pumpBatch();
+}
+
+/** Any batch item opens in the full single-image flow (same engine, same mask model). */
+function openBatchItem(it: BatchItem) {
+  if (batchBusy) { W.toast('Batch is using the model — wait a few seconds', true); return; }
+  state.image = it.image;
+  state.mask = it.mask
+    ? { width: it.mask.width, height: it.mask.height, alpha: new Float32Array(it.mask.alpha) }
+    : null;
+  state.log = new OpLog();
+  state.fx = JSON.parse(JSON.stringify(FX_OFF));
+  state.bg = { ...BG_TRANSPARENT };
+  state.tr = { ...TR_IDENTITY };
+  if (state.previewURL) URL.revokeObjectURL(state.previewURL);
+  state.previewURL = rgbToObjectURL(it.image);
+  const up = $('#uploadedImg') as HTMLImageElement;
+  up.src = state.previewURL;
+  ($('#demoSubject') as HTMLElement).style.display = 'none';
+  $('#dimLbl').textContent = `${it.image.width} × ${it.image.height}`;
+  $('#expDims').textContent = `${it.image.width} × ${it.image.height} · PNG · transparent`;
+  ensureCanvases(it.image);
+  if (!finishingWired) { wireFinishing(); finishingWired = true; }
+  if (state.mask) state.log.commitRegion(state.mask, 'batch', () => null);
+  W.showView('view-editor');
+  if (state.mask) {
+    lastCompare = 'after';
+    refreshDisplay();
+  } else {
+    lastCompare = 'before';
+    up.style.display = 'block';
+    if (resultCanvas) resultCanvas.style.display = 'none';
+    syncUndoRedo();
+    W.toast('No cutout yet for this image');
+  }
+}
+
+function enterBatch() {
+  W.showView('view-batch');
+  renderBatch();
+  void pumpBatch(); // resumes anything still queued
+}
+
+async function downloadItemPNG(it: BatchItem): Promise<void> {
+  if (!it.mask) return;
+  const tmp = document.createElement('canvas');
+  drawComposite(tmp, { image: it.image, mask: it.mask }, { kind: 'transparent' }, FX_OFF);
+  const blob: Blob | null = await new Promise((res) => tmp.toBlob(res, 'image/png'));
+  if (!blob) { W.toast(`Export failed for ${it.name}`, true); return; }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `${stem(it.name)}-cutout.png`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  W.toast(`Exported ${a.download}`);
+}
+
+// Minimal stored (uncompressed) ZIP writer: one single-file download instead
+// of N blocked popups, zero dependencies.
+const CRC_T = (() => {
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1;
+    t[n] = c;
+  }
+  return t;
+})();
+function crc32(d: Uint8Array): number {
+  let c = 0xFFFFFFFF;
+  for (let i = 0; i < d.length; i++) c = CRC_T[(c ^ d[i]) & 0xFF] ^ (c >>> 8);
+  return (c ^ 0xFFFFFFFF) >>> 0;
+}
+function zipStore(files: { name: string; data: Uint8Array }[]): Uint8Array {
+  const enc = new TextEncoder();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  const push = (p: Uint8Array) => { chunks.push(p); total += p.length; };
+  const h16 = (v: number) => new Uint8Array([v & 0xFF, (v >>> 8) & 0xFF]);
+  const h32 = (v: number) => new Uint8Array([v & 0xFF, (v >>> 8) & 0xFF, (v >>> 16) & 0xFF, (v >>> 24) & 0xFF]);
+  const now = new Date();
+  const dosTime = (now.getHours() << 11) | (now.getMinutes() << 5) | ((now.getSeconds() / 2) | 0);
+  const dosDate = ((now.getFullYear() - 1980) << 9) | ((now.getMonth() + 1) << 5) | now.getDate();
+  const central: Uint8Array[] = [];
+  let cenTotal = 0;
+  const cpush = (p: Uint8Array) => { central.push(p); cenTotal += p.length; };
+  let off = 0;
+  for (const f of files) {
+    const nb = enc.encode(f.name);
+    const crc = crc32(f.data);
+    const head = new Uint8Array(30 + nb.length);
+    const dv = new DataView(head.buffer);
+    dv.setUint32(0, 0x04034B50, true);
+    dv.setUint16(4, 20, true);
+    dv.setUint16(6, 0x0800, true);
+    dv.setUint16(8, 0, true);
+    dv.setUint16(10, dosTime, true);
+    dv.setUint16(12, dosDate, true);
+    dv.setUint32(14, crc, true);
+    dv.setUint32(18, f.data.length, true);
+    dv.setUint32(22, f.data.length, true);
+    dv.setUint16(26, nb.length, true);
+    dv.setUint16(28, 0, true);
+    head.set(nb, 30);
+    push(head);
+    push(f.data);
+    cpush(new Uint8Array([
+      ...h32(0x02014B50), ...h16(20), ...h16(20), ...h16(0x0800), ...h16(0),
+      ...h16(dosTime), ...h16(dosDate), ...h32(crc), ...h32(f.data.length), ...h32(f.data.length),
+      ...h16(nb.length), ...h16(0), ...h16(0), ...h16(0), ...h16(0), ...h32(0), ...h32(off),
+    ]));
+    cpush(nb);
+    off += head.length + f.data.length;
+  }
+  const cenOff = off;
+  for (const c of central) push(c);
+  push(new Uint8Array([
+    ...h32(0x06054B50), ...h16(0), ...h16(0), ...h16(files.length), ...h16(files.length),
+    ...h32(cenTotal), ...h32(cenOff), ...h16(0),
+  ]));
+  const out = new Uint8Array(total);
+  let o = 0;
+  for (const c of chunks) { out.set(c, o); o += c.length; }
+  return out;
+}
+
+async function exportAllZIP(): Promise<void> {
+  const doneItems = batch.filter((b) => b.status === 'done' && b.mask);
+  if (doneItems.length === 0) { W.toast('Nothing finished yet', true); return; }
+  const files: { name: string; data: Uint8Array }[] = [];
+  let i = 0;
+  for (const it of doneItems) {
+    $('#batchCount').textContent = `Exporting ${i} / ${doneItems.length}…`;
+    const tmp = document.createElement('canvas');
+    drawComposite(tmp, { image: it.image, mask: it.mask! }, { kind: 'transparent' }, FX_OFF);
+    const blob: Blob | null = await new Promise((res) => tmp.toBlob(res, 'image/png'));
+    if (!blob) { W.toast(`Export failed for ${it.name}`, true); continue; }
+    files.push({ name: `${stem(it.name)}-cutout.png`, data: new Uint8Array(await blob.arrayBuffer()) });
+    i++;
+  }
+  if (files.length === 0) { renderBatch(); return; }
+  const zip = zipStore(files);
+  const url = URL.createObjectURL(new Blob([zip.buffer as ArrayBuffer], { type: 'application/zip' }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'rmbg-batch.zip';
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+  renderBatch();
+  W.toast(`Exported ${files.length} cutout${files.length === 1 ? '' : 's'} (.zip)`);
+}
+
+const batchPicker = (() => {
+  const el = document.createElement('input');
+  el.type = 'file';
+  el.accept = 'image/*';
+  el.multiple = true;
+  el.hidden = true;
+  document.body.appendChild(el);
+  el.addEventListener('change', () => {
+    const fs = el.files;
+    el.value = '';
+    if (fs && fs.length > 0) void addBatchFiles(fs);
+  });
+  return el;
+})();
+
 // ---------- install overrides ----------
 
 W.loadFile = realLoadFile;
@@ -1175,6 +1516,22 @@ $('#btnRecompute').addEventListener('click', () => { void rerun(); });
   stopElapsed();
   W.showView('view-landing');
 };
+// Real batch queue (overrides the mockup shell's toast/toy tiles).
+($('#btnBatch') as HTMLButtonElement).onclick = enterBatch;
+($('#btnBatchAdd') as HTMLButtonElement).onclick = () => batchPicker.click();
+($('#btnBatchExport') as HTMLButtonElement).onclick = () => { void exportAllZIP(); };
+{
+  const grid = $('#batchGrid') as HTMLElement;
+  grid.addEventListener('dragover', (e) => e.preventDefault());
+  grid.addEventListener('drop', (e) => {
+    e.preventDefault();
+    const fs = e.dataTransfer?.files;
+    if (fs && fs.length > 0) void addBatchFiles(fs);
+  });
+  const pill = document.querySelector('#view-batch .pill') as HTMLElement | null;
+  if (pill) pill.textContent = 'On-device · sequential';
+  renderBatch(); // clear the mockup's toy tiles on boot
+}
 function syncUndoRedo() {
   ( $('#btnUndo') as HTMLButtonElement).disabled = !state.log.canUndo || !state.mask;
   ( $('#btnRedo') as HTMLButtonElement).disabled = !state.log.canRedo || !state.mask;
