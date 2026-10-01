@@ -190,9 +190,6 @@ function stopElapsed() {
   const el = $('#prepElapsed') as HTMLElement | null;
   if (el) el.textContent = '';
 }
- *  - initiate with no later download = served from cache.
- *  - download + progress = bytes flowing (determinate MB bar).
- *  - all done = session build ("Loading into memory…"). */
 function makeInitProgress() {
   const pendingFiles = new Set<string>();
   const bytes = new Map<string, { loaded: number; total: number }>();
