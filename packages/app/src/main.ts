@@ -267,6 +267,8 @@ async function ensureReady(): Promise<void> {
   try {
     const res = await callWorker({ type: 'init' }, undefined, (p) => tracker.onEvent(p));
     state.backend = res.backend ?? 'unknown';
+    const gpu = $('#gpuLine') as HTMLElement | null;
+    if (gpu) gpu.textContent = `GPU: ${res.gpu ?? 'unknown'} → ${state.backend}`;
   } finally {
     tracker.finish();
   }

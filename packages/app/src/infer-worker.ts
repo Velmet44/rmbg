@@ -20,7 +20,7 @@ self.onmessage = async (e: MessageEvent) => {
       await adapter.init((p) =>
         (self as any).postMessage({ id: msg.id, type: 'progress', ...p }),
       );
-      (self as any).postMessage({ id: msg.id, type: 'ready', backend: adapter.backend });
+      (self as any).postMessage({ id: msg.id, type: 'ready', backend: adapter.backend, gpu: (adapter as any).gpuDescription ?? 'unknown' });
     } catch (err) {
       (self as any).postMessage({ id: msg.id, type: 'error', message: String(err).slice(0, 300) });
     }

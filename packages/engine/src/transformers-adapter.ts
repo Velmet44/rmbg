@@ -45,6 +45,9 @@ export class TransformersAdapter implements SegmentationAdapter {
 
   get backend(): string | null { return this.deviceUsed; }
 
+  /** Human-readable GPU description from probing (for UI + diagnostics). */
+  gpuDescription: string = 'unknown';
+
   get runtimeUrl(): string { return this.opts.runtimeUrl ?? DEFAULT_RUNTIME_URL; }
 
   private runtime(): Promise<any> {
@@ -71,14 +74,16 @@ export class TransformersAdapter implements SegmentationAdapter {
     // Never benchmark-or-hang on a software rasterizer: SwiftShader/llvmpipe
     // can grind for tens of minutes instead of failing cleanly. Detect it
     // up front and go straight to WASM (the honest CPU path).
+    // NOTE: probe the high-performance adapter with one retry — at page
+    // load the GPU process may still be starting and Chrome can briefly
+    // hand out a fallback (Basic Render Driver) adapter instead.
     let softwareGPU = false;
+    let gpuDesc = 'unknown';
     if (want === 'auto') {
-      try {
-        const adapter = await (navigator as any).gpu?.requestAdapter?.();
-        const info = adapter?.info || {};
-        const text = `${info.device || ''} ${info.architecture || ''} ${info.description || ''} ${info.vendor || ''}`;
-        softwareGPU = /swiftshader|llvmpipe|software|basic render/i.test(text);
-      } catch { softwareGPU = false; }
+      const probe = await probeGPU();
+      softwareGPU = probe.software;
+      gpuDesc = probe.desc;
+      this.gpuDescription = gpuDesc;
     }
     const cb = progress
       ? (p: any) => {
@@ -220,6 +225,33 @@ export class TransformersAdapter implements SegmentationAdapter {
 /** Transient GPU failure signatures worth one session rebuild before giving up. */
 function isDeviceLoss(msg: string): boolean {
   return /MapAsync|bad_alloc|ERROR_CODE:\s*6|device lost|device removed/i.test(msg);
+}
+
+/** Probe for a real GPU. Requests the high-performance adapter (avoids the
+ *  fallback/Basic-Render-Driver pick) and retries once after a pause, since
+ *  at page load the GPU process may not be ready yet. */
+export async function probeGPU(): Promise<{ software: boolean; desc: string }> {
+  const read = async (): Promise<{ software: boolean; desc: string } | null> => {
+    try {
+      const adapter = await (navigator as any).gpu?.requestAdapter?.({ powerPreference: 'high-performance' });
+      if (!adapter) return { software: true, desc: 'no WebGPU adapter' };
+      const info = adapter?.info || {};
+      const desc =
+        info.description || info.device || [info.vendor, info.architecture].filter(Boolean).join(' ') || 'gpu';
+      const software = /swiftshader|llvmpipe|software|basic render/i.test(
+        `${info.device || ''} ${info.architecture || ''} ${info.description || ''} ${info.vendor || ''}`,
+      );
+      return { software, desc: software ? `${desc} (software)` : desc };
+    } catch {
+      return { software: true, desc: 'WebGPU unavailable' };
+    }
+  };
+  const first = await read();
+  if (first && !first.software) return first;
+  // Possible early-load fallback adapter: wait for the GPU process, retry once.
+  await new Promise((r) => setTimeout(r, 3000));
+  const second = await read();
+  return second ?? first ?? { software: true, desc: 'WebGPU unavailable' };
 }
 
 function pickBest(out: any): any {  const list = Array.isArray(out) ? out : [out];
