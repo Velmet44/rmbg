@@ -340,9 +340,11 @@
     background-size:8px 8px}
   /* de-slop: subtler hero, calmer hover */
   #view-landing{background:radial-gradient(900px 480px at 50% 18%,rgba(52,211,153,.04),transparent 70%)}
-  /* landing footer: formalities row, quiet by design */
-  #landingFoot{margin-top:26px;display:flex;gap:10px;flex-wrap:wrap;justify-content:center;align-items:center;
-    font-size:12px;color:var(--faint);padding:0 12px 10px;text-align:center}
+  /* landing footer: full-width band, distinct from page */
+  #landingFoot{align-self:stretch;margin-top:26px;display:flex;gap:10px;flex-wrap:wrap;justify-content:center;
+    align-items:center;font-size:12px;color:var(--faint);text-align:center;
+    background:var(--bg2);border-top:1px solid var(--border);
+    padding:14px 12px calc(14px + env(safe-area-inset-bottom))}
   #landingFoot a{color:var(--muted);text-decoration:none;display:inline-flex;align-items:center;gap:6px}
   #landingFoot a:hover{color:var(--text)}
   #landingFoot svg{width:15px;height:15px;flex:0 0 15px}
