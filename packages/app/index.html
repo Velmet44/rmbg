@@ -344,12 +344,14 @@
   /* de-slop: subtler hero, calmer hover */
   #view-landing{background:radial-gradient(900px 480px at 50% 18%,rgba(52,211,153,.04),transparent 70%)}
   /* landing footer: full-width band, distinct from page */
-  #landingFoot{align-self:stretch;display:flex;gap:10px;flex-wrap:wrap;justify-content:center;
+  #landingFoot{position:absolute;left:0;right:0;bottom:0;
+    display:flex;gap:10px;flex-wrap:wrap;justify-content:center;
     align-items:center;font-size:12px;color:var(--faint);text-align:center;
     background:var(--bg2);border-top:1px solid var(--border);
-    /* Bleed into the landing's 24px padding so the band is truly full-bleed. */
-    margin:26px -24px -24px;
+    margin:0;
     padding:14px 12px calc(14px + env(safe-area-inset-bottom))}
+  /* Reserve so scrolled-to-end content never hides under the pinned footer. */
+  #view-landing{padding-bottom:120px}
   #landingFoot a{color:var(--muted);text-decoration:none;display:inline-flex;align-items:center;gap:6px}
   #landingFoot a:hover{color:var(--text)}
   #landingFoot svg{width:15px;height:15px;flex:0 0 15px}
