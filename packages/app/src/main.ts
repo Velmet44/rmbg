@@ -169,7 +169,27 @@ async function isModelCached(): Promise<boolean> {
   }
 }
 
-/** Phased, honest progress for worker init.
+/** Wall-clock heartbeat for long phases. A ticking clock proves the page is
+ *  alive even when the runtime emits no byte events (cached fetches, silent
+ *  session build, CPU inference). Frozen clock = actually stuck. */
+let elapsedTimer: number | null = null;
+function startElapsed(label: string) {
+  stopElapsed();
+  const t0 = Date.now();
+  const el = $('#prepElapsed') as HTMLElement | null;
+  const tick = () => {
+    if (!el) return;
+    const s = Math.floor((Date.now() - t0) / 1000);
+    el.textContent = `${label} ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  };
+  tick();
+  elapsedTimer = window.setInterval(tick, 1000);
+}
+function stopElapsed() {
+  if (elapsedTimer !== null) { clearInterval(elapsedTimer); elapsedTimer = null; }
+  const el = $('#prepElapsed') as HTMLElement | null;
+  if (el) el.textContent = '';
+}
  *  - initiate with no later download = served from cache.
  *  - download + progress = bytes flowing (determinate MB bar).
  *  - all done = session build ("Loading into memory…"). */
@@ -462,11 +482,13 @@ async function realStart(_withDemo: boolean) {
     } else {
       setBar(0, 'Downloading model… (one-time, ~98 MB)');
     }
+    startElapsed('working');
     await ensureReady();
     $('#prepTitle').textContent = 'Removing background…';
     setBar(1, `running on-device (${state.backend}) — the page stays usable`);
     const t0 = performance.now();
     state.mask = await segmentCurrent('ai');
+    stopElapsed();
     W.showView('view-editor');
     lastCompare = 'after';
     refreshDisplay();
@@ -479,6 +501,7 @@ async function realStart(_withDemo: boolean) {
     // one tap away via Refine if the user disagrees later.
     setTimeout(() => $('#fb').classList.remove('on'), 14000);
   } catch (e) {
+    stopElapsed();
     const msg = String((e as Error)?.message ?? e);
     $('#prepTitle').textContent = 'Could not start the local model';
     // Full error on screen (not just the toast): failures must be diagnosable.
@@ -490,11 +513,14 @@ async function realStart(_withDemo: boolean) {
 async function rerun() {
   if (!state.image) return;
   W.runScan('Recomputing…');
+  startElapsed('recomputing');
   try {
     state.mask = await segmentCurrent('recompute');
+    stopElapsed();
     refreshDisplay();
     W.toast('Recomputed');
   } catch (e) {
+    stopElapsed();
     W.toast(`Recompute failed: ${String(e).slice(0, 120)}`, true);
   }
 }
