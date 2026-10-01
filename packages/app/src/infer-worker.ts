@@ -14,6 +14,9 @@ self.onmessage = async (e: MessageEvent) => {
   const msg = e.data;
   if (msg?.type === 'init') {
     try {
+      // The runtime itself (~MBs of JS/WASM) downloads before any model
+      // byte can flow; announce it so this phase is never silent.
+      (self as any).postMessage({ id: msg.id, type: 'progress', status: 'runtime', file: 'runtime' });
       await adapter.init((p) =>
         (self as any).postMessage({ id: msg.id, type: 'progress', ...p }),
       );

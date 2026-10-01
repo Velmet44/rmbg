@@ -111,8 +111,17 @@ let reqId = 0;
 interface Pending {
   resolve: (v: any) => void;
   reject: (e: Error) => void;
-  onProgress?: (p: ModelProgress & { id: number; type: string }) => void;
+  onProgress?: (p: WorkerProgress) => void;
 }
+/** Progress events flowing worker → UI, including worker lifecycle phases. */
+type WorkerProgress = {
+  id: number;
+  type: string;
+  status: ModelProgress['status'] | 'runtime';
+  file: string;
+  loaded?: number;
+  total?: number;
+};
 const pending = new Map<number, Pending>();
 worker.onmessage = (e: MessageEvent) => {
   const m = e.data;
@@ -202,21 +211,30 @@ function makeInitProgress() {
     for (const f of bytes.values()) { l += f.loaded; t += f.total; }
     if (t > 0) setBar(l / t, `${fmtMB(l)}`, `${fmtMB(t)} · cached after first visit`);
   };
-  // Stall reporter (informational only — never changes state): if bytes were
-  // flowing and then stop for 20 s, say so instead of freezing silently.
+  // Stall reporter (informational only — never changes state).
+  // Covers three silences distinctly: runtime fetch, queued-but-no-bytes,
+  // and mid-download stalls.
+  let firstInitiateAt = 0;
   const stallTimer = setInterval(() => {
-    if (finished || !sawDownload || stallNoted) return;
-    if (Date.now() - lastEventAt > 20000) {
+    if (finished) return;
+    const idle = Date.now() - lastEventAt;
+    if (!sawDownload && pendingFiles.size > 0 && firstInitiateAt > 0 && Date.now() - firstInitiateAt > 30000 && idle > 10000) {
+      setBar(0.03, `waiting for bytes… (${pendingFiles.size} file(s) queued, connection slow?)`);
+    } else if (sawDownload && !stallNoted && idle > 20000) {
       stallNoted = true;
       setBar(0.05, 'download stalled — connection may be slow, still trying…');
     }
   }, 5000);
   return {
-    onEvent(p: ModelProgress) {
+    onEvent(p: WorkerProgress) {
       if (finished) return;
       lastEventAt = Date.now();
-      if (p.status === 'initiate') pendingFiles.add(p.file);
-      else if (p.status === 'download') { sawDownload = true; pendingFiles.add(p.file); }
+      if (p.status === 'runtime') {
+        setBar(0.03, 'Loading AI engine… (one-time code download)');
+      } else if (p.status === 'initiate') {
+        if (firstInitiateAt === 0) firstInitiateAt = Date.now();
+        pendingFiles.add(p.file);
+      } else if (p.status === 'download') { sawDownload = true; pendingFiles.add(p.file); }
       else if (p.status === 'progress') {
         sawDownload = true;
         if (p.total) {
