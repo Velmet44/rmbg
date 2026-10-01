@@ -136,7 +136,11 @@ worker.onmessage = (e: MessageEvent) => {
     return;
   }
   if (m?.type === 'progress') {
-    pending.get(m.id)?.onProgress?.(m);
+    // Fan-out, not routing: single-flight init means the pipeline runs once
+    // (usually won by the page-load prefetch), but EVERY in-flight caller
+    // with a progress listener must see the events — otherwise the visible
+    // flow gets zero bytes-events while another silent request consumes them.
+    pending.forEach((p) => p.onProgress?.(m));
     return;
   }
   const p = pending.get(m?.id);
