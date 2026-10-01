@@ -528,17 +528,22 @@ function runReveal() {
   ov.style.display = 'block';
   const finish = () => { if (my === revealToken) ov!.style.display = 'none'; };
   if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) { finish(); return; }
-  const t0 = performance.now(), DUR = 900;
-  const frame = (t: number) => {
+  // Hold on the original for 2 s so the result lands mentally first, then
+  // wipe slowly (~1.6 s). Cancel-safe via the token.
+  setTimeout(() => {
     if (my !== revealToken) return;
-    const k = Math.min(1, (t - t0) / DUR);
-    const e = 1 - Math.pow(1 - k, 3);
-    cv.style.clipPath = `inset(0 0 0 ${e * 100}%)`;
-    line.style.left = `${e * 100}%`;
-    if (k < 1) requestAnimationFrame(frame);
-    else finish();
-  };
-  requestAnimationFrame(frame);
+    const t0 = performance.now(), DUR = 1600;
+    const frame = (t: number) => {
+      if (my !== revealToken) return;
+      const k = Math.min(1, (t - t0) / DUR);
+      const e = 1 - Math.pow(1 - k, 3);
+      cv.style.clipPath = `inset(0 0 0 ${e * 100}%)`;
+      line.style.left = `${e * 100}%`;
+      if (k < 1) requestAnimationFrame(frame);
+      else finish();
+    };
+    requestAnimationFrame(frame);
+  }, 2000);
 }
 
 function realCompare(m: string) {
