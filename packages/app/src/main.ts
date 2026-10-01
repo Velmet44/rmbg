@@ -159,9 +159,15 @@ function setBar(frac: number, mbText: string, totalText?: string) {
   ($('#prepBar') as HTMLElement).style.width = `${Math.min(100, Math.max(0, frac * 100))}%`;
   $('#prepMB').textContent = mbText;
   $('#prepPct').textContent = `${Math.round(frac * 100)}%`;
-  if (totalText !== undefined) {
-    const t = $('#prepTotal') as HTMLElement | null;
-    if (t) t.textContent = totalText;
+  // The "/ total" segment only exists when a total is known (determinate
+  // download). Otherwise it hides, so cached runs never show a dangling "/ …".
+  const wrap = $('#prepTotalWrap') as HTMLElement | null;
+  const t = $('#prepTotal') as HTMLElement | null;
+  if (totalText !== undefined && t && wrap) {
+    t.textContent = totalText;
+    wrap.style.display = '';
+  } else if (wrap) {
+    wrap.style.display = 'none';
   }
 }
 
@@ -519,9 +525,7 @@ async function realStart(_withDemo: boolean) {
   ($('#prepRing') as HTMLElement).style.display = 'block';
   ($('#prepError') as HTMLElement)?.classList.add('hidden');
   $('#prepTitle').textContent = 'Preparing local AI…';
-  setBar(0, 'Checking cache…', '—');
-  const gpuEl = $('#gpuLine') as HTMLElement | null;
-  if (gpuEl) gpuEl.textContent = 'checking hardware…';
+  setBar(0, 'Checking cache…');
   try {
     // Real cache verdict (Cache API), never a timing guess: the label must
     // not claim "cached" unless the files are actually there.
@@ -562,7 +566,7 @@ async function realStart(_withDemo: boolean) {
     ($('#prepRing') as HTMLElement).style.display = 'none';
     // Error gets its own line — the MB line keeps neutral progress state
     // instead of a 300-char message beside a stale total and 0%.
-    setBar(0, 'failed', '—');
+    setBar(0, 'failed');
     const errEl = $('#prepError') as HTMLElement | null;
     if (errEl) {
       errEl.textContent = msg.slice(0, 300);
