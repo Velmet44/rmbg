@@ -213,7 +213,9 @@ function makeInitProgress() {
   const draw = () => {
     let l = 0, t = 0;
     for (const f of bytes.values()) { l += f.loaded; t += f.total; }
-    if (t > 0) setBar(l / t, `${fmtMB(l)}`, `${fmtMB(t)} · cached after first visit`);
+    // Download occupies the first 60%: session build + inference follow,
+    // so the bar must never read 100% before the work is done.
+    if (t > 0) setBar((l / t) * 0.6, `${fmtMB(l)}`, `${fmtMB(t)} · cached after first visit`);
   };
   // Stall reporter (informational only — never changes state).
   // Covers three silences distinctly: runtime fetch, queued-but-no-bytes,
@@ -229,10 +231,27 @@ function makeInitProgress() {
       setBar(0.05, 'download stalled — connection may be slow, still trying…');
     }
   }, 5000);
+  // Session build starts after the last file resolves (downloaded or cached)
+  // and emits no byte events, so announce it on a short debounce: a new
+  // initiate/download/progress arriving first cancels it (files can resolve
+  // interleaved). Without this the cached path sits at 0% for ~12s with no UI.
+  let buildTimer: number | null = null;
+  const queueBuildNote = () => {
+    if (buildTimer !== null) clearTimeout(buildTimer);
+    buildTimer = window.setTimeout(() => {
+      buildTimer = null;
+      if (finished || pendingFiles.size > 0) return;
+      setBar(
+        sawDownload ? 0.65 : 0.5,
+        sawDownload ? 'download complete — loading into memory…' : 'cached model found — loading into memory…',
+      );
+    }, 600);
+  };
   return {
     onEvent(p: WorkerProgress) {
       if (finished) return;
       lastEventAt = Date.now();
+      if (p.status !== 'done' && buildTimer !== null) { clearTimeout(buildTimer); buildTimer = null; }
       if (p.status === 'runtime') {
         setBar(0.03, 'Loading AI engine… (one-time code download)');
       } else if (p.status === 'initiate') {
@@ -252,13 +271,14 @@ function makeInitProgress() {
         }
       } else if (p.status === 'done') {
         pendingFiles.delete(p.file);
-        if (sawDownload && pendingFiles.size === 0) {
-          $('#prepTitle').textContent = 'Preparing local AI…';
-          setBar(1, 'download complete — loading into memory…');
-        }
+        if (pendingFiles.size === 0) queueBuildNote();
       }
     },
-    finish() { finished = true; clearInterval(stallTimer); },
+    finish() {
+      finished = true;
+      clearInterval(stallTimer);
+      if (buildTimer !== null) { clearTimeout(buildTimer); buildTimer = null; }
+    },
   };
 }
 
@@ -453,6 +473,10 @@ function drawOriginal(target: HTMLCanvasElement, img: ImageRef) {
 
 // ---------- real flows (override mockup globals) ----------
 
+/** Cancel token: Back during preparing invalidates the in-flight run, so a
+ *  late worker result is discarded instead of popping the editor open. */
+let prepToken = 0;
+
 async function realLoadFile(f: File) {
   if (!f.type.startsWith('image/')) { W.toast('Not an image file', true); return; }
   // Reset the picker so re-selecting the SAME file still fires change.
@@ -490,10 +514,14 @@ async function segmentCurrent(label: string): Promise<AlphaMask> {
 
 async function realStart(_withDemo: boolean) {
   if (!state.image) { W.toast('Pick an image first', true); W.showView('view-landing'); return; }
+  const my = ++prepToken;
   W.showView('view-preparing');
   ($('#prepRing') as HTMLElement).style.display = 'block';
+  ($('#prepError') as HTMLElement)?.classList.add('hidden');
   $('#prepTitle').textContent = 'Preparing local AI…';
-  setBar(0, 'Checking cache…');
+  setBar(0, 'Checking cache…', '—');
+  const gpuEl = $('#gpuLine') as HTMLElement | null;
+  if (gpuEl) gpuEl.textContent = 'checking hardware…';
   try {
     // Real cache verdict (Cache API), never a timing guess: the label must
     // not claim "cached" unless the files are actually there.
@@ -505,11 +533,16 @@ async function realStart(_withDemo: boolean) {
     }
     startElapsed('working');
     await ensureReady();
+    if (my !== prepToken) return; // Back hit mid-init: warm session stays, but show nothing
     $('#prepTitle').textContent = 'Removing background…';
-    setBar(1, `running on-device (${state.backend}) — the page stays usable`);
+    const backendLabel = state.backend.startsWith('webgpu') ? 'GPU'
+      : state.backend.startsWith('wasm') ? 'CPU' : state.backend;
+    setBar(0.85, `model ready — removing background on-device (${backendLabel})`);
     const t0 = performance.now();
     state.mask = await segmentCurrent('ai');
+    if (my !== prepToken) return; // Back hit mid-inference: discard, don't pop the editor open
     stopElapsed();
+    setBar(1, 'done');
     W.showView('view-editor');
     lastCompare = 'after';
     refreshDisplay();
@@ -522,11 +555,19 @@ async function realStart(_withDemo: boolean) {
     // one tap away via Refine if the user disagrees later.
     setTimeout(() => $('#fb').classList.remove('on'), 14000);
   } catch (e) {
+    if (my !== prepToken) return; // cancelled: landing is already showing
     stopElapsed();
     const msg = String((e as Error)?.message ?? e);
     $('#prepTitle').textContent = 'Could not start the local model';
-    // Full error on screen (not just the toast): failures must be diagnosable.
-    setBar(0, `failed: ${msg.slice(0, 300)}`);
+    ($('#prepRing') as HTMLElement).style.display = 'none';
+    // Error gets its own line — the MB line keeps neutral progress state
+    // instead of a 300-char message beside a stale total and 0%.
+    setBar(0, 'failed', '—');
+    const errEl = $('#prepError') as HTMLElement | null;
+    if (errEl) {
+      errEl.textContent = msg.slice(0, 300);
+      errEl.classList.remove('hidden');
+    }
     W.toast(`Model start failed: ${msg.slice(0, 160)}`, true);
   }
 }
@@ -1122,6 +1163,14 @@ syncStrokeButtons();
 installRefineCapture();
 
 $('#btnRecompute').addEventListener('click', () => { void rerun(); });
+// Real Back-cancel (overrides the mockup shell's view-only binding, which
+// never stopped the worker job). The warm session is kept; only the UI run
+// is invalidated via prepToken.
+($('#btnPrepCancel') as HTMLButtonElement).onclick = () => {
+  prepToken++;
+  stopElapsed();
+  W.showView('view-landing');
+};
 function syncUndoRedo() {
   ( $('#btnUndo') as HTMLButtonElement).disabled = !state.log.canUndo || !state.mask;
   ( $('#btnRedo') as HTMLButtonElement).disabled = !state.log.canRedo || !state.mask;
