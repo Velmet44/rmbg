@@ -5,11 +5,8 @@
 import { TransformersAdapter, createEngine, type ImageRef } from '@rmbg/engine';
 
 const MODEL_ID = 'studioludens/birefnet-lite-512';
-// Pinned HF revision (models/manifest.json): skips latest-manifest lookup so
-// every reload hits the same cached files deterministically.
-const MODEL_REVISION = '4a3c40c36c94093cc1e724d9ea428b8fa4b57dc7';
 
-const adapter = new TransformersAdapter(MODEL_ID, { device: 'auto', revision: MODEL_REVISION });
+const adapter = new TransformersAdapter(MODEL_ID, { device: 'auto' });
 const engine = createEngine(adapter);
 let busy = false;
 
