@@ -216,6 +216,25 @@
   .colorline input[type=color]{width:38px;height:30px;border:1px solid var(--border);border-radius:7px;
     background:none;padding:2px;cursor:pointer}
   .colorline code{font-family:var(--mono);font-size:12.5px;color:var(--muted)}
+  /* report drawer (mirrors export drawer) */
+  #reportWrap{position:fixed;inset:0;display:none;z-index:80}
+  #reportWrap.on{display:block}
+  #reportWrap .scrim{position:absolute;inset:0;background:rgba(0,0,0,.55);animation:viewIn .2s}
+  #reportDrawer{position:absolute;top:0;right:0;bottom:0;width:min(380px,94vw);background:var(--bg2);
+    border-left:1px solid var(--border);padding:20px 18px;overflow-y:auto;
+    animation:drawerIn .25s cubic-bezier(.2,.9,.25,1)}
+  #reportDrawer h2{font-size:15px}
+  #reportDrawer .x{float:right}
+  #reportDrawer a{color:var(--muted)}
+  .field{width:100%;background:var(--panel);border:1px solid var(--border);border-radius:8px;
+    color:var(--text);font-family:inherit;font-size:13px;padding:10px 12px;margin-top:8px;box-sizing:border-box}
+  .field:focus{border-color:rgba(52,211,153,.55);outline:none}
+  textarea.field{min-height:96px;resize:vertical}
+  #reportDrawer details{margin-top:12px}
+  #reportDrawer summary{font-size:12.5px;color:var(--muted);cursor:pointer}
+  #diagPre{white-space:pre-wrap;word-break:break-word;font-family:var(--mono);font-size:11px;color:var(--muted);
+    background:#0d1114;border:1px solid var(--border);border-radius:8px;padding:10px;max-height:180px;
+    overflow-y:auto;margin:8px 0 0}
   .hidden{display:none!important}
   .tip{font-size:11.5px;color:var(--faint);line-height:1.55;margin-top:10px}
   .tip b{color:var(--muted)}
@@ -707,6 +726,25 @@
     <div class="progress hidden" id="expProgWrap" style="margin-top:16px"><i id="expBar"></i></div>
     <div class="row" style="margin-top:16px"><button class="btn primary" id="btnDoExport">Export PNG</button></div>
     <p class="tip" id="expNote">Pick a format, then Export.</p>
+  </div>
+</div>
+
+<div id="reportWrap">
+  <div class="scrim" data-close-report></div>
+  <div id="reportDrawer">
+    <button class="iconbtn x" data-close-report>✕</button>
+    <h2>Report an issue</h2>
+    <p class="tip">Opens a prefilled GitHub draft — you review and submit there. Nothing sends automatically.</p>
+    <div class="cap2">TITLE (OPTIONAL)</div>
+    <input class="field" id="repTitle" maxlength="200" placeholder="Leave blank to write on GitHub" />
+    <div class="cap2">WHAT HAPPENED (OPTIONAL)</div>
+    <textarea class="field" id="repBody" placeholder="What happened? Leave blank to write on GitHub"></textarea>
+    <details>
+      <summary>Diagnostics attached (no image pixels)</summary>
+      <pre id="diagPre"></pre>
+    </details>
+    <div class="row" style="margin-top:16px"><button class="btn primary" id="btnSendReport">Open prefilled issue ↗</button></div>
+    <p class="tip">Needs a free GitHub login to submit. Prefer plain GitHub? <a href="https://github.com/Velmet44/rmbg/issues" target="_blank" rel="noopener">open issues directly</a>.</p>
   </div>
 </div>
 

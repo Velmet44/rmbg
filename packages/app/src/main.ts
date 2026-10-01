@@ -106,8 +106,12 @@ function derivedView(): { image: ImageRef; mask: AlphaMask } {
 // One request at a time (the worker enforces it too); responses route by id.
 // Progress events stream separately so the bar and phase text stay live.
 const worker = new Worker(new URL('./infer-worker.ts', import.meta.url), { type: 'module' });
-let reqId = 0;
-interface Pending {
+// Must match infer-worker.ts + models/manifest.json (issue-diagnostics display only).
+const MODEL_ID = 'studioludens/birefnet-lite-512';
+const MODEL_REV = '4a3c40c36c94093cc1e724d9ea428b8fa4b57dc7';
+/** GPU description from the worker probe (unknown until first init). */
+let gpuDesc = 'unknown';
+let reqId = 0;interface Pending {
   resolve: (v: any) => void;
   reject: (e: Error) => void;
   onProgress?: (p: WorkerProgress) => void;
@@ -292,6 +296,7 @@ async function ensureReady(): Promise<void> {
   try {
     const res = await callWorker({ type: 'init' }, undefined, (p) => tracker.onEvent(p));
     state.backend = res.backend ?? 'unknown';
+    gpuDesc = res.gpu ?? 'unknown';
     const gpu = $('#gpuLine') as HTMLElement | null;
     if (gpu) gpu.textContent = `GPU: ${res.gpu ?? 'unknown'} → ${state.backend}`;
   } finally {
@@ -1527,6 +1532,62 @@ async function paintStars(): Promise<void> {
   } catch { /* offline etc: pill stays hidden */ }
 }
 
+// ---------- issue reporter ----------
+// Toasts + window errors feed a small ring buffer so a GitHub issue draft
+// can carry real diagnostics. Pixel-free by construction: only short text.
+const diagLog: string[] = [];
+function noteDiag(kind: string, msg: string) {
+  const t = new Date().toISOString().slice(11, 19);
+  diagLog.push(`[${t}] ${kind}: ${String(msg).slice(0, 150)}`);
+  if (diagLog.length > 60) diagLog.splice(0, diagLog.length - 60);
+}
+
+function buildDiag(logLines = 30): string {
+  const L: string[] = [];
+  L.push('### App diagnostics (auto-collected, no image pixels included)');
+  L.push(`- Time: ${new Date().toISOString()}`);
+  L.push(`- Backend: ${state.backend} (GPU: ${gpuDesc})`);
+  L.push(`- Model: ${MODEL_ID} rev ${MODEL_REV}`);
+  L.push(`- Image: ${state.image ? `${state.image.width}x${state.image.height}` : 'none loaded'}`);
+  L.push(`- Mask: ${state.mask ? `${state.mask.width}x${state.mask.height}` : 'none'}`);
+  L.push(`- Background: ${state.bg.kind}; shadow ${state.fx.shadow.on ? 'on' : 'off'}` +
+    `; feather ${state.fx.feather}; defringe ${state.fx.defringe}`);
+  L.push(`- UA: ${navigator.userAgent}`);
+  L.push(`- Page: ${location.origin}${location.pathname}`);
+  L.push('');
+  L.push('<details><summary>Recent log</summary>');
+  L.push('');
+  L.push('```');
+  const tail = diagLog.slice(-logLines);
+  L.push(tail.length > 0 ? tail.join('\n') : '(empty)');
+  L.push('```');
+  L.push('</details>');
+  return L.join('\n');
+}
+
+function openReport() {
+  ( $('#repTitle') as HTMLInputElement).value = '';
+  ( $('#repBody') as HTMLTextAreaElement).value = '';
+  ( $('#diagPre') as HTMLElement).textContent = buildDiag();
+  ( $('#reportWrap') as HTMLElement).classList.add('on');
+}
+
+function submitReport() {
+  const title = (( $('#repTitle') as HTMLInputElement).value.trim() || 'Issue report').slice(0, 200);
+  const details = ( $('#repBody') as HTMLTextAreaElement).value.trim().slice(0, 3000);
+  let logLines = 30;
+  let url = '';
+  for (;;) {
+    const diag = buildDiag(logLines);
+    const body = (details ? details + '\n\n' : '_No description yet — writing on GitHub._\n\n') + '---\n' + diag;
+    url = `https://github.com/Velmet44/rmbg/issues/new?title=${encodeURIComponent(title)}&body=${encodeURIComponent(body)}`;
+    if (url.length <= 7500 || logLines <= 0) break;
+    logLines = logLines > 10 ? 10 : 0;
+  }
+  window.open(url, '_blank', 'noopener');
+  W.toast('Issue draft opened on GitHub — review and submit there');
+}
+
 // ---------- install overrides ----------
 
 W.loadFile = realLoadFile;
@@ -1537,6 +1598,29 @@ installStrokeCapture();
 syncStrokeButtons();
 installRefineCapture();
 void paintStars();
+// Feed the diagnostics buffer from every app toast + uncaught error.
+// (Mock shell toasts bypass this — only real-flow messages are collected.)
+{
+  const raw = W.toast?.bind(W);
+  W.toast = (m: string, e?: boolean) => {
+    noteDiag(e ? 'error' : 'info', String(m));
+    raw?.(m, e);
+  };
+  window.addEventListener('error', (ev) => noteDiag('onerror', String(ev.message ?? ev)));
+}
+// Footer "Report an issue" opens the prefilled-draft drawer; the href stays
+// as a no-JS fallback. Drawer closes via scrim, Cancel, or Escape.
+($('#btnSendReport') as HTMLButtonElement).onclick = submitReport;
+$$('[data-close-report]').forEach((b) => ((b as HTMLElement).onclick = () => {
+  ($('#reportWrap') as HTMLElement).classList.remove('on');
+}));
+document.querySelector('#landingFoot a[href*="/issues"]')?.addEventListener('click', (e) => {
+  e.preventDefault();
+  openReport();
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') ($('#reportWrap') as HTMLElement).classList.remove('on');
+});
 
 $('#btnRecompute').addEventListener('click', () => { void rerun(); });
 // Real Back-cancel (overrides the mockup shell's view-only binding, which
