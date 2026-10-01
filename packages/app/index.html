@@ -17,6 +17,10 @@
     --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
   }
   *{box-sizing:border-box;margin:0;padding:0}
+  *{scrollbar-width:thin;scrollbar-color:#2b333c transparent}
+  *::-webkit-scrollbar{width:10px;height:10px}
+  *::-webkit-scrollbar-thumb{background:#242b32;border-radius:99px;border:2px solid transparent;background-clip:content-box}
+  *::-webkit-scrollbar-track{background:transparent}
   html,body{height:100%}
   body{background:var(--bg);color:var(--text);font-family:var(--font);font-size:14px;overflow:hidden;
     -webkit-font-smoothing:antialiased}
@@ -349,7 +353,28 @@
   #mobileNav .ic svg{width:18px;height:18px}
   .choice .e{display:flex;justify-content:center;margin-bottom:8px;color:var(--muted)}
   .choice.on .e{color:var(--accent)}
-  .choice .e svg{width:22px;height:22px}
+  /* FAQ accordion + scroll reveal */
+  #faq{width:min(620px,92vw);margin-top:26px}
+  #faq h2{font-size:15px;letter-spacing:.14em;color:var(--faint);text-align:center}
+  .faq{border:1px solid var(--border);border-radius:10px;background:var(--panel);margin-top:8px;overflow:hidden}
+  .faq summary{list-style:none;cursor:pointer;display:flex;justify-content:space-between;align-items:center;
+    gap:10px;padding:13px 14px;font-size:13.5px;font-weight:650}
+  .faq summary::-webkit-details-marker{display:none}
+  .faq summary::marker{content:""}
+  .faq .plus{color:var(--accent);font-weight:800;font-size:16px;line-height:1;transition:transform .25s ease;flex:0 0 auto}
+  .faq[open] .plus{transform:rotate(45deg)}
+  .faq-a{display:grid;grid-template-rows:0fr;transition:grid-template-rows .28s ease}
+  .faq[open] .faq-a{grid-template-rows:1fr}
+  .faq-ai{overflow:hidden}
+  .faq-a p{padding:0 14px 14px;color:var(--muted);font-size:13px;line-height:1.6}
+  .faq-a a{color:var(--accent)}
+  .reveal{opacity:0;transform:translateY(14px);transition:opacity .5s ease,transform .5s ease}
+  .reveal.in{opacity:1;transform:none}
+  @media (prefers-reduced-motion:reduce){
+    .reveal{opacity:1;transform:none;transition:none}
+    .faq-a{transition:none}
+    .faq .plus{transition:none}
+  }
   .minicheck{width:22px;height:22px;border-radius:6px;border:1px solid #3a434d;
     background-image:conic-gradient(#3a434d 0 25%,#232a31 0 50%,#3a434d 0 75%,#232a31 0);
     background-size:8px 8px}
@@ -458,6 +483,50 @@
     <span><b>✓</b>Full-resolution export</span>
     <span><b>✓</b>Runs locally</span>
   </div>
+
+  <section id="faq" aria-label="Frequently asked questions">
+    <h2 class="reveal">FAQ</h2>
+    <details class="faq reveal">
+      <summary>Is it really free? What's the catch?<span class="plus" aria-hidden="true">+</span></summary>
+      <div class="faq-a"><div class="faq-ai"><p>Yes. MIT-licensed, no account, no credits, no watermark, no artificial resolution cap. The ~98&nbsp;MB AI model downloads once and lives in your browser cache.</p></div></div>
+    </details>
+    <details class="faq reveal">
+      <summary>Do my photos leave my device?<span class="plus" aria-hidden="true">+</span></summary>
+      <div class="faq-a"><div class="faq-ai"><p>No. Inference runs on-device; image bytes are never uploaded. The only download is the model itself.</p></div></div>
+    </details>
+    <details class="faq reveal">
+      <summary>Why is the first run slow?<span class="plus" aria-hidden="true">+</span></summary>
+      <div class="faq-a"><div class="faq-ai"><p>First visit downloads the model and builds the session; return visits skip the download. GPU-backed browsers are fastest with a slower CPU fallback — the app tells you which it's using.</p></div></div>
+    </details>
+    <details class="faq reveal">
+      <summary>Erase, restore, guided, recompute — which do I use?<span class="plus" aria-hidden="true">+</span></summary>
+      <div class="faq-a"><div class="faq-ai"><p>Brushes for small slips (paint, then Apply commits); guided click for one-tap coherent regions; drag-a-box recompute when the AI misread a whole area — the rest of the mask stays untouched. Everything is undoable.</p></div></div>
+    </details>
+    <details class="faq reveal">
+      <summary>Which files go in and out?<span class="plus" aria-hidden="true">+</span></summary>
+      <div class="faq-a"><div class="faq-ai"><p>In: PNG, JPG, WebP, AVIF, BMP, GIF (first frame); HEIC isn't supported yet. Out: PNG, WebP, JPEG, plus AVIF where your browser can encode it.</p></div></div>
+    </details>
+    <details class="faq reveal">
+      <summary>Why does JPEG demand a background?<span class="plus" aria-hidden="true">+</span></summary>
+      <div class="faq-a"><div class="faq-ai"><p>JPEG can't store transparency, so you choose the background explicitly — nothing is ever flattened silently.</p></div></div>
+    </details>
+    <details class="faq reveal">
+      <summary>How good are hair and tricky edges?<span class="plus" aria-hidden="true">+</span></summary>
+      <div class="faq-a"><div class="faq-ai"><p>Float alpha masks preserve hair and semi-transparency, and originals are never mutated. Zoom to 100% to inspect, feather and defringe to finish.</p></div></div>
+    </details>
+    <details class="faq reveal">
+      <summary>How does batch work?<span class="plus" aria-hidden="true">+</span></summary>
+      <div class="faq-a"><div class="faq-ai"><p>Up to 24 images in a sequential on-device queue with per-item retry. Open any item in the full editor, export all as one ZIP.</p></div></div>
+    </details>
+    <details class="faq reveal">
+      <summary>It failed — now what?<span class="plus" aria-hidden="true">+</span></summary>
+      <div class="faq-a"><div class="faq-ai"><p>Model won't start: retry, it's usually a download or GPU hiccup. Out of memory: use a smaller image and close tabs. Undecodable file: convert it first. Still stuck: use Report an issue in the footer — diagnostics attach automatically, no pixels included.</p></div></div>
+    </details>
+    <details class="faq reveal">
+      <summary>What model runs, and under what license?<span class="plus" aria-hidden="true">+</span></summary>
+      <div class="faq-a"><div class="faq-ai"><p>BiRefNet-lite 512px, MIT — provenance pinned in <a href="https://github.com/Velmet44/rmbg/blob/main/models/manifest.json" target="_blank" rel="noopener">models/manifest.json</a>. Heavier non-commercial weights are bring-your-own only, never bundled.</p></div></div>
+    </details>
+  </section>
   </main>
 
   <footer id="landingFoot">
@@ -472,6 +541,8 @@
     <a href="mailto:velmet44@gmail.com">velmet44@gmail.com</a>
     <span class="fsep" aria-hidden="true">·</span>
     <span>MIT © 2026 Velmet44</span>
+    <span class="fsep" aria-hidden="true">·</span>
+    <a href="#faq" id="faqLink">FAQ</a>
     <span class="fsep" aria-hidden="true">·</span>
     <a href="https://github.com/Velmet44/rmbg/blob/main/models/manifest.json" target="_blank" rel="noopener">Model: BiRefNet-lite (MIT)</a>
   </footer>

@@ -1730,6 +1730,35 @@ installStrokeCapture();
 syncStrokeButtons();
 installRefineCapture();
 void paintStars();
+// Scroll reveal for the FAQ (and anything else marked .reveal): fade/slide
+// in on entry, once. Root is the landing scroller; reduced-motion users
+// get everything visible immediately via CSS.
+{
+  const root = $('#view-landing') as HTMLElement | null;
+  const els = Array.from(document.querySelectorAll('.reveal'));
+  els.forEach((el, i) => ((el as HTMLElement).style.transitionDelay = `${Math.min(i, 10) * 40}ms`));
+  if (root && 'IntersectionObserver' in window) {
+    const io = new IntersectionObserver((entries) => {
+      for (const e of entries) {
+        if (e.isIntersecting) {
+          (e.target as HTMLElement).classList.add('in');
+          io.unobserve(e.target);
+        }
+      }
+    }, { root, threshold: 0.15 });
+    els.forEach((el) => io.observe(el));
+  } else {
+    els.forEach((el) => el.classList.add('in'));
+  }
+}
+// Footer FAQ link smooth-scrolls to the section (href is the no-JS fallback).
+document.querySelector('#faqLink')?.addEventListener('click', (e) => {
+  e.preventDefault();
+  ($('#faq') as HTMLElement)?.scrollIntoView({
+    behavior: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
+    block: 'start',
+  });
+});
 // Grey out AVIF up front on browsers without an encoder (never silently
 // encode the wrong format — realExport also guards at click time).
 void avifSupported().then((ok) => {
