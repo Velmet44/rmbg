@@ -125,16 +125,6 @@ type WorkerProgress = {
 const pending = new Map<number, Pending>();
 worker.onmessage = (e: MessageEvent) => {
   const m = e.data;
-  if (m?.type === 'logline') {
-    const box = $('#prepLogLines') as HTMLElement | null;
-    if (box) {
-      const div = document.createElement('div');
-      div.textContent = m.text;
-      box.appendChild(div);
-      while (box.children.length > 20) box.firstChild?.remove();
-    }
-    return;
-  }
   if (m?.type === 'progress') {
     // Fan-out, not routing: single-flight init means the pipeline runs once
     // (usually won by the page-load prefetch), but EVERY in-flight caller
