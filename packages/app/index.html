@@ -321,6 +321,15 @@
     background-size:8px 8px}
   /* de-slop: subtler hero, calmer hover */
   #view-landing{background:radial-gradient(900px 480px at 50% 18%,rgba(52,211,153,.04),transparent 70%)}
+  /* landing footer: formalities row, quiet by design */
+  #landingFoot{margin-top:26px;display:flex;gap:10px;flex-wrap:wrap;justify-content:center;align-items:center;
+    font-size:12px;color:var(--faint);padding:0 12px 10px;text-align:center}
+  #landingFoot a{color:var(--muted);text-decoration:none;display:inline-flex;align-items:center;gap:6px}
+  #landingFoot a:hover{color:var(--text)}
+  #landingFoot svg{width:15px;height:15px;flex:0 0 15px}
+  #landingFoot .starpill{border:1px solid var(--border);border-radius:99px;padding:2px 9px;
+    font-weight:700;color:var(--muted);font-family:var(--mono);font-size:11px;white-space:nowrap}
+  #landingFoot .fsep{color:#2b333c;user-select:none}
   .dropzone:hover,.dropzone.drag{box-shadow:0 0 0 4px rgba(52,211,153,.07),0 14px 34px rgba(0,0,0,.45)}
 
   /* mobile nav */
@@ -405,6 +414,22 @@
     <span><b>✓</b>Full-resolution export</span>
     <span><b>✓</b>Runs locally</span>
   </div>
+
+  <footer id="landingFoot">
+    <a href="https://github.com/Velmet44/rmbg" target="_blank" rel="noopener" aria-label="RMBG on GitHub">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="6.5"/><path d="M6 5.5 3.5 8 6 10.5M10 5.5 12.5 8 10 10.5"/></svg>
+      <span>GitHub</span>
+      <span class="starpill hidden" id="starPill" title="GitHub stars">★ <b id="starN"></b></span>
+    </a>
+    <span class="fsep" aria-hidden="true">·</span>
+    <a href="https://github.com/Velmet44/rmbg/issues" target="_blank" rel="noopener">Report an issue</a>
+    <span class="fsep" aria-hidden="true">·</span>
+    <a href="mailto:velmet44@gmail.com">velmet44@gmail.com</a>
+    <span class="fsep" aria-hidden="true">·</span>
+    <span>MIT © 2026 Velmet44</span>
+    <span class="fsep" aria-hidden="true">·</span>
+    <a href="https://github.com/Velmet44/rmbg/blob/main/models/manifest.json" target="_blank" rel="noopener">Model: BiRefNet-lite (MIT)</a>
+  </footer>
 </section>
 
 <!-- ============ PREPARING ============ -->

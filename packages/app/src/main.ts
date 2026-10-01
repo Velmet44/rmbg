@@ -1497,6 +1497,36 @@ const batchPicker = (() => {
   return el;
 })();
 
+// ---------- footer: live star count (cached, silent) ----------
+// One GitHub API call per day max, 5s timeout, invisible on failure
+// (offline, private mode, rate-limited). No third-party embed in HTML.
+async function paintStars(): Promise<void> {
+  const pill = $('#starPill') as HTMLElement | null;
+  const num = $('#starN') as HTMLElement | null;
+  if (!pill || !num) return;
+  const KEY = 'rmbg-stars';
+  try {
+    const cached = JSON.parse(localStorage.getItem(KEY) ?? 'null') as { n: number; t: number } | null;
+    if (cached && typeof cached.n === 'number' && Date.now() - cached.t < 86400000) {
+      num.textContent = String(cached.n);
+      pill.classList.remove('hidden');
+      return;
+    }
+  } catch { /* corrupted cache: refetch below */ }
+  try {
+    const ctl = new AbortController();
+    const to = setTimeout(() => ctl.abort(), 5000);
+    const r = await fetch('https://api.github.com/repos/Velmet44/rmbg', { signal: ctl.signal });
+    clearTimeout(to);
+    if (!r.ok) return;
+    const j = await r.json() as { stargazers_count?: number };
+    if (typeof j.stargazers_count !== 'number') return;
+    try { localStorage.setItem(KEY, JSON.stringify({ n: j.stargazers_count, t: Date.now() })); } catch { /* private mode */ }
+    num.textContent = String(j.stargazers_count);
+    pill.classList.remove('hidden');
+  } catch { /* offline etc: pill stays hidden */ }
+}
+
 // ---------- install overrides ----------
 
 W.loadFile = realLoadFile;
@@ -1506,6 +1536,7 @@ W.runExport = realExport;
 installStrokeCapture();
 syncStrokeButtons();
 installRefineCapture();
+void paintStars();
 
 $('#btnRecompute').addEventListener('click', () => { void rerun(); });
 // Real Back-cancel (overrides the mockup shell's view-only binding, which
