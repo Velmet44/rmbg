@@ -2,14 +2,29 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<!-- interactive-widget=resizes-content: the app is a scroll-locked, fixed-layout
+     shell, so the iOS on-screen keyboard used to pan the page instead of just
+     resizing the drawer. -->
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
 <title>RMBG — Remove backgrounds on your device</title>
+<meta name="description" content="Free, open-source background remover that runs entirely on your device. Drop an image, brush or box away mistakes, export a full-resolution transparent PNG. No account, no upload, no watermark." />
+<meta name="color-scheme" content="dark" />
+<meta name="theme-color" content="#0b0d0f" />
+<meta property="og:type" content="website" />
+<meta property="og:url" content="https://velmet44.github.io/rmbg" />
+<meta property="og:title" content="RMBG — Remove backgrounds on your device" />
+<meta property="og:description" content="Free, open-source background remover that runs entirely in your browser. No upload, no account, no watermark." />
+<meta property="og:image" content="https://velmet44.github.io/rmbg/sample-after.png" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="RMBG — Remove backgrounds on your device" />
+<meta name="twitter:description" content="Free, open-source background remover that runs entirely in your browser. No upload, no account, no watermark." />
+<meta name="twitter:image" content="https://velmet44.github.io/rmbg/sample-after.png" />
 <link rel="icon" href="data:," />
 <style>
   :root{
     --bg:#0b0d0f; --bg2:#101315; --panel:#14181c; --panel2:#191e23;
     --border:#242b32; --border-soft:#1e242a;
-    --text:#e9edf0; --muted:#98a2ab; --faint:#6b757e;
+    --text:#e9edf0; --muted:#98a2ab; --faint:#7f8993;
     --accent:#34d399; --accent-dim:rgba(52,211,153,.14);
     --danger:#f87171; --warn:#fbbf24;
     --radius:10px; --radius-s:7px;
@@ -23,14 +38,23 @@
   *::-webkit-scrollbar-track{background:transparent}
   html,body{height:100%}
   body{background:var(--bg);color:var(--text);font-family:var(--font);font-size:14px;overflow:hidden;
+    /* four position:fixed inset:0 views sit on top of the scroll container, so
+       without this a rubber-band/overscroll gesture on any of them scrolls the
+       document behind them and strands the chrome. */
+    overscroll-behavior:none;
     -webkit-font-smoothing:antialiased}
   button{font-family:inherit;cursor:pointer;touch-action:manipulation}
   :focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
+  /* Visually hidden, still announced. Used for accessible names on controls
+     that have no visible text, and for live regions that must not disturb the
+     layout (e.g. the scan progress announcer). */
+  .sr{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;
+    clip:rect(0 0 0 0);clip-path:inset(50%);white-space:nowrap;border:0}
 
   /* ---------- generic ---------- */
   .btn{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--border);
     background:var(--panel2);color:var(--text);border-radius:var(--radius-s);
-    padding:9px 14px;font-size:13.5px;font-weight:550;transition:all .15s ease;white-space:nowrap}
+    padding:9px 14px;font-size:13.5px;font-weight:600;transition:all .15s ease;white-space:nowrap}
   .btn:hover{border-color:#3a434d;background:#20262c;transform:translateY(-1px)}
   .btn:active{transform:translateY(0)}
   .btn.primary{background:var(--accent);border-color:var(--accent);color:#06281c;font-weight:700}
@@ -53,29 +77,34 @@
   .dot{width:7px;height:7px;border-radius:50%;background:var(--accent);
     box-shadow:0 0 8px var(--accent);animation:pulse 2s infinite}
   @keyframes pulse{50%{opacity:.5}}
-  .mocktag{font-size:10px;font-weight:600;letter-spacing:.08em;color:var(--faint);
-    border:1px solid var(--border);border-radius:6px;padding:3px 8px;text-transform:uppercase;background:transparent}
 
   /* ---------- views ---------- */
   .view{position:fixed;inset:0;display:none;flex-direction:column;animation:viewIn .3s ease}
   .view.on{display:flex}
   @keyframes viewIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
 
-  /* ---------- landing ---------- */
-  #view-landing{align-items:center;justify-content:safe center;padding:24px;overflow-y:auto;
-    background:radial-gradient(900px 480px at 50% 18%,rgba(52,211,153,.07),transparent 70%)}
+  /* ---------- landing ----------
+     Single authoritative block: `justify-content` is flex-start because
+     #landingMain centers the content in the leftover space and #landingFoot
+     pins to the bottom (a `safe center` here just fought that). The top inset
+     lives on the view, NOT on .topbar — see the topbar note below. */
+  #view-landing{align-items:center;justify-content:flex-start;overflow-y:auto;
+    padding:calc(24px + env(safe-area-inset-top)) 24px 24px;
+    background:radial-gradient(900px 480px at 50% 18%,rgba(52,211,153,.04),transparent 70%)}
   /* Never let flex-shrink squash content when the viewport is short:
      squashed + overflow:hidden was clipping dropzone text. */
   #view-landing>*{flex-shrink:0}
   .brand{font-size:15px;font-weight:800;letter-spacing:.28em;color:var(--text);margin-bottom:16px}
   .brand span{color:var(--accent)}
-  .hero-title{font-size:clamp(30px,4.5vw,64px);font-weight:750;letter-spacing:-.02em;text-align:center}
+  .hero-title{font-size:clamp(30px,4.5vw,64px);font-weight:700;letter-spacing:-.02em;text-align:center}
   .hero-sub{color:var(--muted);margin-top:10px;text-align:center;font-size:15px}
   .dropzone{margin-top:44px;width:min(560px,92vw);border:1.5px dashed #333c45;border-radius:16px;
     background:var(--panel);padding:64px 24px;text-align:center;cursor:pointer;
     transition:all .2s ease;position:relative;overflow:hidden}
   .dropzone:hover,.dropzone.drag{border-color:var(--accent);background:#151c18;
-    box-shadow:0 0 0 4px rgba(52,211,153,.08),0 18px 50px rgba(0,0,0,.45);transform:translateY(-2px)}
+    /* de-slop: subtler lift, calmer glow (this was declared twice; the second,
+       softer box-shadow silently won, so it is now stated once, here). */
+    box-shadow:0 0 0 4px rgba(52,211,153,.07),0 14px 34px rgba(0,0,0,.45);transform:translateY(-2px)}
   .dropzone .big{font-size:17px;font-weight:650}
   .dropzone .small{color:var(--muted);margin-top:6px;font-size:13px}
   .dropzone .formats{margin-top:14px;font-size:11.5px;color:var(--faint);font-family:var(--mono)}
@@ -121,8 +150,11 @@
   .mbline{margin-top:10px;font-family:var(--mono);font-size:12px;color:var(--muted)}
   .mbline b{color:var(--text)}
 
-  /* ---------- editor frame ---------- */
-  #view-editor{overflow:hidden}
+  /* ---------- editor frame ----------
+     The notch inset goes on the VIEW, not on .topbar: the bar is a fixed
+     height:50px/flex:0 0 50px border-box, so padding-top:env(...) ate the
+     bar's own content height and collapsed it in iPhone landscape. */
+  #view-editor{overflow:hidden;padding-top:env(safe-area-inset-top)}
   .topbar{height:50px;flex:0 0 50px;display:flex;align-items:center;gap:10px;padding:0 12px;
     background:var(--bg2);border-bottom:1px solid var(--border);z-index:30}
   .topbar .logo{font-weight:800;letter-spacing:.22em;font-size:13px;margin-right:4px}
@@ -137,7 +169,7 @@
   .tool{display:flex;align-items:center;gap:10px;width:100%;text-align:left;border:1px solid transparent;
     background:transparent;color:var(--muted);border-radius:9px;padding:10px 12px;font-size:13.5px;
     font-weight:600;transition:all .15s}
-  .tool .ic{width:22px;text-align:center;font-size:15px}
+  .tool .ic{display:flex;justify-content:center;align-items:center;width:22px}
   .tool:hover{background:var(--panel2);color:var(--text)}
   .tool.on{background:var(--accent-dim);border-color:rgba(52,211,153,.45);color:var(--text)}
   .tool.on .ic{color:var(--accent)}
@@ -220,7 +252,8 @@
   #scan .chip .lbl{color:var(--text)}
   #scan .chip .t{font-family:var(--mono);font-size:11.5px;color:var(--faint);
     font-variant-numeric:tabular-nums}
-  /* bottom bar */
+  /* bottom bar. Same notch-inset trap as .topbar: it must not pad itself, the
+     #view-editor padding above owns the top inset. */
   .statusbar{flex:0 0 38px;display:flex;align-items:center;gap:8px;padding:0 12px;
     background:var(--bg2);border-top:1px solid var(--border);font-size:12.5px;color:var(--muted);z-index:30}
   .statusbar .spacer{flex:1}
@@ -241,10 +274,8 @@
   @keyframes panelIn{from{opacity:0;transform:translateX(8px)}to{opacity:1;transform:none}}
   .card{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);
     padding:13px;margin-bottom:12px}
-  .card.tight{padding:10px}
   .card h4{font-size:13px;font-weight:700;margin-bottom:4px}
   .card p.desc{font-size:12.5px;color:var(--muted);line-height:1.5}
-  .okline{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:650;color:var(--accent)}
   /* removal switch — a real <button role="switch">, not a range input: removal is
      binary, and a range slider would be both ambiguous and keyboard-hostile. */
   .switch{display:flex;align-items:center;gap:12px;width:100%;text-align:left;
@@ -279,19 +310,30 @@
     text-align:center;color:var(--muted);transition:all .14s}
   .choice:hover{border-color:#3a434d;color:var(--text);transform:translateY(-1px)}
   .choice.on{border-color:rgba(52,211,153,.55);background:var(--accent-dim);color:var(--text)}
-  .choice .e{font-size:19px;display:block;margin-bottom:6px}
+  .choice .e{display:flex;justify-content:center;align-items:center;margin-bottom:8px;color:var(--muted)}
+  .choice.on .e{color:var(--accent)}
   .choice .t{font-size:12px;font-weight:700}
   .mini{background:none;border:1px solid var(--border);color:var(--muted);border-radius:7px;
     padding:7px 10px;font-size:12.5px;width:100%;margin-top:8px;transition:all .13s}
   .mini:hover{color:var(--text);border-color:#3a434d}
   .mini.on{color:var(--accent);border-color:rgba(52,211,153,.5);background:var(--accent-dim)}
   .swatches{display:flex;gap:7px;margin-top:10px}
-  .sw{width:26px;height:26px;border-radius:50%;border:2px solid transparent;cursor:pointer;transition:all .13s}
+  /* Real <button> so the swatches are focusable, activatable by keyboard and
+     announced with a name. `appearance:none` + `background:none` strip the UA
+     button chrome; the inline background the markup sets still wins, and the
+     2px transparent border keeps the 26px box identical to the old <span>
+     (global border-box), so `.sw.on`'s white ring and the dark swatch's own
+     border-color land exactly where they did before. */
+  .sw{appearance:none;-webkit-appearance:none;background:none;padding:0;
+    width:26px;height:26px;border-radius:50%;border:2px solid transparent;cursor:pointer;transition:all .13s}
   .sw:hover{transform:scale(1.12)}
   .sw.on{border-color:#fff;box-shadow:0 0 0 2px var(--accent)}
   .colorline{display:flex;align-items:center;gap:10px;margin-top:10px}
+  /* `background:none` is deliberately NOT set: it hides the native swatch, so in
+     Chrome the control renders as an empty box and the current colour is
+     invisible — exactly the thing the control exists to show. */
   .colorline input[type=color]{width:38px;height:30px;border:1px solid var(--border);border-radius:7px;
-    background:none;padding:2px;cursor:pointer}
+    padding:2px;cursor:pointer}
   .colorline code{font-family:var(--mono);font-size:12.5px;color:var(--muted)}
   /* report drawer (mirrors export drawer) */
   #reportWrap{position:fixed;inset:0;display:none;z-index:80}
@@ -351,8 +393,8 @@
   #localPop h4{font-size:12px;letter-spacing:.1em;margin-bottom:8px}
   #localPop p{font-size:12.5px;color:var(--muted);line-height:1.55}
 
-  /* toast */
-  #toasts{position:fixed;bottom:52px;left:50%;transform:translateX(-50%);z-index:120;
+  /* toast — clears the mobile nav (56px + home-indicator inset) plus a gap. */
+  #toasts{position:fixed;bottom:calc(64px + env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);z-index:120;
     display:flex;flex-direction:column;gap:8px;align-items:center;pointer-events:none}
   .toast{background:#1c2228;border:1px solid var(--border);border-left:3px solid var(--accent);
     border-radius:9px;padding:10px 16px;font-size:13px;box-shadow:0 12px 30px rgba(0,0,0,.5);
@@ -395,15 +437,15 @@
      .cap2 stays (export drawer); `shimmer` stays (preparing progress bar). */
   .cap2{font-size:10.5px;font-weight:800;letter-spacing:.12em;color:var(--faint);margin:16px 2px 4px}
   .toast.err{border-left-color:var(--danger)}
-  /* svg icons */
-  .tool .ic{display:flex;justify-content:center;width:22px}
+  /* svg icons — every inline svg carries a viewBox and NO width/height, so
+     without an explicit CSS size it resolves through the replaced-element
+     default (300x150) and blows up. .choice .e needed the same treatment. */
   .tool .ic svg{width:16px;height:16px}
   #mobileNav .ic{display:flex}
   #mobileNav .ic svg{width:18px;height:18px}
-  .choice .e{display:flex;justify-content:center;margin-bottom:8px;color:var(--muted)}
-  .choice.on .e{color:var(--accent)}
+  .choice .e svg{width:22px;height:22px}
   /* FAQ accordion + scroll reveal */
-  #faq{width:min(620px,92vw);margin-top:200px}
+  #faq{width:min(620px,92vw);margin-top:56px}
   #faq h2{font-size:15px;letter-spacing:.14em;color:var(--faint);text-align:center}
   .faq{border:1px solid var(--border);border-radius:10px;background:var(--panel);margin-top:8px;overflow:hidden}
   .faq summary{list-style:none;cursor:pointer;display:flex;justify-content:space-between;align-items:center;
@@ -419,24 +461,27 @@
   .faq-a a{color:var(--accent)}
   .reveal{opacity:0;transform:translateY(14px);transition:opacity .5s ease,transform .5s ease}
   .reveal.in{opacity:1;transform:none}
+  /* Reduced motion. A scoped global guard, because the animation surface is
+     scattered across nine keyframe blocks (viewIn/panelIn/drawerIn/toastIn/
+     spin/pulse/shimmer/sweep plus every hover transform and the .progress i
+     width transition) and a hand-written list kept missing one every time.
+     `!important` is the point: the guarded rules are equally specific.
+     .reveal still needs an explicit opacity, since its fade is not an
+     animation but a state class. */
   @media (prefers-reduced-motion:reduce){
-    .reveal{opacity:1;transform:none;transition:none}
-    .faq-a{transition:none}
-    .faq .plus{transition:none}
+    *,*::before,*::after{animation:none!important;transition:none!important}
+    .reveal{opacity:1;transform:none}
     /* The sweep becomes a static tint: the chip still reports the real elapsed
        time, so a reduced-motion user keeps the honest "still working" signal. */
-    #scan .beam{animation:none;opacity:.22}
-    #scan .chip .dot{animation:none;opacity:.8}
+    #scan .beam{opacity:.22}
+    #scan .chip .dot{opacity:.8}
   }
   .minicheck{width:22px;height:22px;border-radius:6px;border:1px solid #3a434d;
     background-image:conic-gradient(#3a434d 0 25%,#232a31 0 50%,#3a434d 0 75%,#232a31 0);
     background-size:8px 8px}
-  /* de-slop: subtler hero, calmer hover */
-  #view-landing{background:radial-gradient(900px 480px at 50% 18%,rgba(52,211,153,.04),transparent 70%)}
-  /* landing footer: full-width band, distinct from page */
   /* Sticky-footer layout: main centers content in leftover space, footer
-     pins to the bottom in normal flow — no overlap, no phantom scroll. */
-  #view-landing{justify-content:flex-start}
+     pins to the bottom in normal flow — no overlap, no phantom scroll.
+     (#view-landing is declared once, above, and carries the de-slopped hero.) */
   #landingMain{flex:1 0 auto;width:100%;display:flex;flex-direction:column;
     align-items:center;justify-content:space-evenly}
   #landingFoot{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;
@@ -449,13 +494,15 @@
   #landingFoot a:hover{color:var(--text)}
   #landingFoot svg{width:15px;height:15px;flex:0 0 15px}
   #landingFoot .fsep{color:#2b333c;user-select:none}
-  .dropzone:hover,.dropzone.drag{box-shadow:0 0 0 4px rgba(52,211,153,.07),0 14px 34px rgba(0,0,0,.45)}
 
   /* mobile nav */
   #mobileNav{display:none}
   @media (max-width:920px){
     .rail{display:none}
-    .ctx{position:fixed;left:0;right:0;bottom:56px;top:auto;width:auto;max-height:44vh;
+    /* Bottom sheet sits ON TOP of the nav, and the nav now owns the home
+       indicator — so the sheet clears 56px + inset, not a flat 56px. */
+    .ctx{position:fixed;left:0;right:0;bottom:calc(56px + env(safe-area-inset-bottom));top:auto;
+      width:auto;max-height:44vh;
       border-left:0;border-top:1px solid var(--border);border-radius:16px 16px 0 0;
       box-shadow:0 -14px 40px rgba(0,0,0,.55)}
     #fb{right:8px;left:8px;width:auto;bottom:auto;top:58px;padding:10px 12px}
@@ -465,12 +512,16 @@
     .statusbar .seg,.statusbar .iconbtn{flex:0 0 auto}
     #localBtn{white-space:nowrap;flex:0 0 auto}
     #zoomLbl{min-width:40px}
-    #mobileNav{display:flex;flex:0 0 56px;background:var(--bg2);border-top:1px solid var(--border);
-      z-index:35}
-  .topbar{padding-left:calc(12px + env(safe-area-inset-left));padding-right:calc(12px + env(safe-area-inset-right));padding-top:env(safe-area-inset-top)}
-  .statusbar{padding-left:calc(12px + env(safe-area-inset-left));padding-right:calc(12px + env(safe-area-inset-right));padding-bottom:env(safe-area-inset-bottom)}
-  #mobileNav{padding-bottom:env(safe-area-inset-bottom)}
-  .ctx{padding-bottom:calc(24px + env(safe-area-inset-bottom))}
+    /* The nav GROWS by the inset rather than padding inside a fixed 56px box
+       (which collapsed its buttons) — and it is the only thing that counts the
+       bottom inset now, so it is not double-counted. */
+    #mobileNav{display:flex;flex:0 0 calc(56px + env(safe-area-inset-bottom));
+      background:var(--bg2);border-top:1px solid var(--border);z-index:35}
+    /* Side insets only. The top inset is #view-editor's padding and the bottom
+       inset is the nav's height — putting either here as well double-counted it
+       against a fixed-height, flex:0 0 box and squeezed the content out. */
+  .topbar{padding-left:calc(12px + env(safe-area-inset-left));padding-right:calc(12px + env(safe-area-inset-right))}
+  .statusbar{padding-left:calc(12px + env(safe-area-inset-left));padding-right:calc(12px + env(safe-area-inset-right))}
   .dropzone .small{font-size:12px;line-height:1.6;padding:0 4px}
   .dropzone{padding:36px 16px}
   .hero-title{overflow-wrap:break-word}
@@ -490,7 +541,7 @@
 <section class="view on" id="view-landing">
   <main id="landingMain">
   <div class="brand">RM<span>BG</span></div>
-  <div class="hero-title">Remove backgrounds. Keep the subject.</div>
+  <h1 class="hero-title">Remove backgrounds. Keep the subject.</h1>
   <div class="hero-sub">Free · Open-source · Runs on your device — no account, no credits</div>
 
   <div class="dropzone" id="dropzone" role="button" tabindex="0" aria-label="Drop image or choose a file">
@@ -507,7 +558,7 @@
   </div>
 
   <div class="trust">
-    <span class="pill"><span class="dot"></span>Processing locally</span>
+    <span class="pill"><span class="dot" aria-hidden="true"></span>Processing locally</span>
     <span class="pill">Original resolution export</span>
     <span class="pill">No watermark</span>
   </div>
@@ -601,10 +652,13 @@
 <!-- ============ PREPARING ============ -->
 <section class="view" id="view-preparing">
   <div class="prep-card">
-    <div class="ring" id="prepRing"></div>
-    <h2 id="prepTitle">Preparing local AI…</h2>
-    <div class="progress shimmer"><i id="prepBar"></i></div>
-    <div class="mbline"><b id="prepMB">Preparing…</b><span id="prepTotalWrap" style="display:none"> / <span id="prepTotal"></span></span><span id="prepPctWrap"> · <span id="prepPct">0%</span></span> <span id="prepElapsed" style="color:var(--faint)"></span></div>
+    <div class="ring" id="prepRing" aria-hidden="true"></div>
+    <h2 id="prepTitle" aria-live="polite">Preparing local AI…</h2>
+    <!-- No aria-valuenow in markup: a percentage may only be shown for measured
+         bytes, and the runtime fetch / session build / segmentation emit none.
+         The owner sets it (and nothing else) when there is a real number. -->
+    <div class="progress shimmer"><i id="prepBar" role="progressbar" aria-valuemin="0" aria-valuemax="100"></i></div>
+    <div class="mbline" aria-live="polite"><b id="prepMB">Preparing…</b><span id="prepTotalWrap" style="display:none"> / <span id="prepTotal"></span></span><span id="prepPctWrap"> · <span id="prepPct">0%</span></span> <span id="prepElapsed" style="color:var(--faint)"></span></div>
     <div id="gpuLine" style="margin-top:6px;font-size:11px;color:var(--faint);font-family:var(--mono)"></div>
     <p id="prepError" class="hidden" style="margin-top:10px;font-size:12px;color:var(--danger);font-family:var(--mono);word-break:break-word;text-align:left"></p>
     <div class="row" style="margin-top:18px">
@@ -629,21 +683,21 @@
   <div class="work">
     <nav class="rail" aria-label="Workflow">
       <div class="cap">WORKFLOW</div>
-      <button class="tool hero on" data-tool="remove"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg></span>Remove<span class="kbd">1</span></button>
-      <button class="tool" data-tool="refine"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg></span>Refine<span class="kbd">2</span></button>
-      <button class="tool" data-tool="background"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg></span>Background<span class="kbd">3</span></button>
-      <button class="tool" data-tool="effects"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.7l5.66 5.66a8 8 0 1 1-11.31 0z"/></svg></span>Effects<span class="kbd">4</span></button>
-      <button class="tool" data-tool="canvas"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6.13 1L6 16a2 2 0 0 0 2 2h15"/><path d="M1 6.13L16 6a2 2 0 0 1 2 2v15"/></svg></span>Canvas<span class="kbd">5</span></button>
+      <button class="tool hero on" data-tool="remove" aria-pressed="true"><span class="ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg></span>Remove<span class="kbd" aria-hidden="true">1</span></button>
+      <button class="tool" data-tool="refine" aria-pressed="false"><span class="ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg></span>Refine<span class="kbd" aria-hidden="true">2</span></button>
+      <button class="tool" data-tool="background" aria-pressed="false"><span class="ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg></span>Background<span class="kbd" aria-hidden="true">3</span></button>
+      <button class="tool" data-tool="effects" aria-pressed="false"><span class="ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 2.7l5.66 5.66a8 8 0 1 1-11.31 0z"/></svg></span>Effects<span class="kbd" aria-hidden="true">4</span></button>
+      <button class="tool" data-tool="canvas" aria-pressed="false"><span class="ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M6.13 1L6 16a2 2 0 0 0 2 2h15"/><path d="M1 6.13L16 6a2 2 0 0 1 2 2v15"/></svg></span>Canvas<span class="kbd" aria-hidden="true">5</span></button>
       <div class="cap" style="margin-top:10px">SESSION</div>
-      <button class="tool" id="btnNewImage"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></span>New image</button>
-      <button class="tool hidden" id="btnToBatch"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg></span>Batch queue</button>
+      <button class="tool" id="btnNewImage"><span class="ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true" focusable="false"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></span>New image</button>
+      <button class="tool hidden" id="btnToBatch"><span class="ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg></span>Batch queue</button>
     </nav>
 
     <div class="stage-wrap">
       <div class="stage" id="stage">
         <div id="viewport">
           <div class="checker" id="checker" style="width:520px;height:380px">
-            <svg id="demoSubject" width="520" height="380" viewBox="0 0 520 380">
+            <svg id="demoSubject" width="520" height="380" viewBox="0 0 520 380" aria-hidden="true" focusable="false">
               <defs><linearGradient id="g1" x1="0" y1="0" x2="1" y2="1">
                 <stop offset="0" stop-color="#e7ecf1"/><stop offset="1" stop-color="#a7b0b9"/>
               </linearGradient></defs>
@@ -661,10 +715,17 @@
                  exactly, so `cover` cropped the original wherever the box aspect
                  did not match and the two layers no longer lined up. -->
             <img id="uploadedImg" alt="" style="display:none;position:absolute;inset:0;width:100%;height:100%;object-fit:contain"/>
-            <canvas id="paintLayer"></canvas>
+            <canvas id="paintLayer" aria-hidden="true"></canvas>
           </div>
           </div>
-          <div id="brushRing"><span class="dotc"></span></div>
+          <div id="brushRing" aria-hidden="true"><span class="dotc"></span></div>
+          <!-- Always-rendered, visually hidden live region for work-in-progress
+               announcements. It CANNOT live inside #scan: that element is
+               display:none until work starts, so a live region mounted there is
+               only registered after its first content change and the start of
+               work is never announced. The ticking clock is aria-hidden so a
+               polite region is not re-announced every 500 ms. -->
+          <span id="scanLive" class="sr" role="status" aria-live="polite"></span>
           <div id="splitUI">
             <div class="half" id="splitL" style="left:0;top:0;bottom:0;width:100%;background:linear-gradient(135deg,#3b4a5a,#1c232b);display:flex;align-items:center;justify-content:center">
               <span class="tag" style="left:10px">ORIGINAL</span>
@@ -680,33 +741,33 @@
             <div class="veil"></div>
             <div class="lines"></div>
             <div class="beam"></div>
-            <div class="chip" role="status">
+            <div class="chip">
               <span class="dot" aria-hidden="true"></span>
               <span class="lbl" id="scanLbl">Working…</span>
-              <span class="t" id="scanTime">0:00</span>
+              <span class="t" id="scanTime" aria-hidden="true">0:00</span>
             </div>
           </div>
         </div>
         <div class="statusbar">
-          <button class="iconbtn" id="zoomOut" title="Zoom out">−</button>
+          <button class="iconbtn" id="zoomOut" title="Zoom out" aria-label="Zoom out">−</button>
           <span id="zoomLbl" style="font-family:var(--mono);min-width:46px;text-align:center">100%</span>
-          <button class="iconbtn" id="zoomIn" title="Zoom in">＋</button>
+          <button class="iconbtn" id="zoomIn" title="Zoom in" aria-label="Zoom in">＋</button>
           <button class="iconbtn" id="zoomFit">Fit</button>
-          <span class="hideM" style="color:var(--faint)">|</span>
-          <div class="seg" role="group" aria-label="Compare mode">
-            <button data-view="after" class="on">Cutout</button>
-            <button data-view="before">Original</button>
-            <button data-view="split">Split</button>
-            <button data-view="overlay">Overlay</button>
-            <button data-view="mask">Mask</button>
+          <span class="hideM" style="color:var(--faint)" aria-hidden="true">|</span>
+          <div class="seg" role="radiogroup" aria-label="Compare mode">
+            <button data-view="after" class="on" role="radio" aria-checked="true">Cutout</button>
+            <button data-view="before" role="radio" aria-checked="false">Original</button>
+            <button data-view="split" role="radio" aria-checked="false">Split</button>
+            <button data-view="overlay" role="radio" aria-checked="false">Overlay</button>
+            <button data-view="mask" role="radio" aria-checked="false">Mask</button>
           </div>
           <div class="spacer"></div>
           <span class="hideM" id="dimLbl" style="font-family:var(--mono)">4032 × 3024</span>
-          <button id="localBtn"><span class="dot"></span><span id="localBtnText">Local processing</span></button>
+          <button id="localBtn" aria-expanded="false" aria-controls="localPop"><span class="dot" aria-hidden="true"></span><span id="localBtnText">Local processing</span></button>
         </div>
       </div>
 
-      <aside class="ctx" id="ctxPanel">
+      <aside class="ctx" id="ctxPanel" aria-label="Tools and settings">
         <div class="panel on" id="p-remove">
           <h3>REMOVE</h3>
           <button class="switch" id="removeSwitch" type="button" role="switch" aria-checked="false">
@@ -733,16 +794,16 @@
           <div class="card">
             <h4>What do you want to change?</h4>
             <div class="choice2">
-              <button class="choice on" data-br="erase"><span class="e"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="8" stroke-dasharray="3 2"/></svg></span><span class="t">Erase</span></button>
-              <button class="choice" data-br="restore"><span class="e"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></span><span class="t">Restore</span></button>
-              <button class="choice" data-br="guided"><span class="e"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="8"/><line x1="12" y1="4" x2="12" y2="7"/><line x1="12" y1="17" x2="12" y2="20"/><line x1="4" y1="12" x2="7" y2="12"/><line x1="17" y1="12" x2="20" y2="12"/></svg></span><span class="t">Guided</span></button>
-              <button class="choice" data-br="recompute"><span class="e"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg></span><span class="t">Recompute</span></button>
+              <button class="choice on" data-br="erase"><span class="e" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="8" stroke-dasharray="3 2"/></svg></span><span class="t">Erase</span></button>
+              <button class="choice" data-br="restore"><span class="e" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true" focusable="false"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></span><span class="t">Restore</span></button>
+              <button class="choice" data-br="guided"><span class="e" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="8"/><line x1="12" y1="4" x2="12" y2="7"/><line x1="12" y1="17" x2="12" y2="20"/><line x1="4" y1="12" x2="7" y2="12"/><line x1="17" y1="12" x2="20" y2="12"/></svg></span><span class="t">Guided</span></button>
+              <button class="choice" data-br="recompute"><span class="e" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg></span><span class="t">Recompute</span></button>
             </div>
           </div>
           <div class="card" id="brushCard">
             <h4 id="brushTitle">Erase brush</h4>
-            <div class="slider-row"><label>Brush size <b id="brushSizeV">48px</b></label><input type="range" id="brushSize" min="4" max="160" value="48"></div>
-            <div class="slider-row"><label>Softness <b id="brushSoftV">40%</b></label><input type="range" id="brushSoft" min="0" max="100" value="40"></div>
+            <div class="slider-row"><label for="brushSize">Brush size <b id="brushSizeV">48px</b></label><input type="range" id="brushSize" min="4" max="160" value="48"></div>
+            <div class="slider-row"><label for="brushSoft">Softness <b id="brushSoftV">40%</b></label><input type="range" id="brushSoft" min="0" max="100" value="40"></div>
             <button class="mini" id="btnShowMask">Show mask</button>
             <button class="mini" id="btnShowOrig">Show original</button>
             <div class="row" style="margin-top:10px">
@@ -755,8 +816,8 @@
             <h4>Guided selection</h4>
             <p class="desc">Click an area — RMBG finds the boundary.</p>
             <div class="choice2" style="margin-top:10px">
-              <button class="choice on" data-g="erase"><span class="e"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="8"/><line x1="12" y1="4" x2="12" y2="7"/><line x1="12" y1="17" x2="12" y2="20"/><line x1="4" y1="12" x2="7" y2="12"/><line x1="17" y1="12" x2="20" y2="12"/></svg></span><span class="t">Guided Erase</span></button>
-              <button class="choice" data-g="restore"><span class="e"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg></span><span class="t">Guided Restore</span></button>
+              <button class="choice on" data-g="erase"><span class="e" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="8"/><line x1="12" y1="4" x2="12" y2="7"/><line x1="12" y1="17" x2="12" y2="20"/><line x1="4" y1="12" x2="7" y2="12"/><line x1="17" y1="12" x2="20" y2="12"/></svg></span><span class="t">Guided Erase</span></button>
+              <button class="choice" data-g="restore"><span class="e" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg></span><span class="t">Guided Restore</span></button>
             </div>
           </div>
           <div class="card hidden" id="recompCard">
@@ -770,18 +831,21 @@
           <h3>BACKGROUND</h3>
           <div class="card">
             <div class="choice2" style="grid-template-columns:1fr 1fr 1fr">
-              <button class="choice on" data-bg="transparent"><span class="e"><span class="minicheck"></span></span><span class="t">Transp.</span></button>
-              <button class="choice" data-bg="color"><span class="e"><svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><circle cx="12" cy="12" r="8"/></svg></span><span class="t">Color</span></button>
-              <button class="choice" data-bg="image"><span class="e"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg></span><span class="t">Image</span></button>
+              <button class="choice on" data-bg="transparent"><span class="e" aria-hidden="true"><span class="minicheck"></span></span><span class="t">Transp.</span></button>
+              <button class="choice" data-bg="color"><span class="e" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="8"/></svg></span><span class="t">Color</span></button>
+              <button class="choice" data-bg="image"><span class="e" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg></span><span class="t">Image</span></button>
             </div>
             <div id="bgColorBox" class="hidden">
-              <div class="colorline"><input type="color" id="bgColor" value="#ffffff"><code id="bgHex">#FFFFFF</code></div>
-              <div class="swatches">
-                <span class="sw on" data-c="#ffffff" style="background:#fff"></span>
-                <span class="sw" data-c="#0b0d0f" style="background:#0b0d0f;border-color:#3a434d"></span>
-                <span class="sw" data-c="#e11d48" style="background:#e11d48"></span>
-                <span class="sw" data-c="#2563eb" style="background:#2563eb"></span>
-                <span class="sw" data-c="#16a34a" style="background:#16a34a"></span>
+              <div class="colorline">
+                <label class="sr" for="bgColor">Background colour</label>
+                <input type="color" id="bgColor" value="#ffffff"><code id="bgHex">#FFFFFF</code>
+              </div>
+              <div class="swatches" role="radiogroup" aria-label="Background colour preset">
+                <button type="button" class="sw on" role="radio" aria-checked="true" aria-label="White" data-c="#ffffff" style="background:#fff"></button>
+                <button type="button" class="sw" role="radio" aria-checked="false" aria-label="Near black" data-c="#0b0d0f" style="background:#0b0d0f;border-color:#3a434d"></button>
+                <button type="button" class="sw" role="radio" aria-checked="false" aria-label="Crimson" data-c="#e11d48" style="background:#e11d48"></button>
+                <button type="button" class="sw" role="radio" aria-checked="false" aria-label="Blue" data-c="#2563eb" style="background:#2563eb"></button>
+                <button type="button" class="sw" role="radio" aria-checked="false" aria-label="Green" data-c="#16a34a" style="background:#16a34a"></button>
               </div>
             </div>
             <div id="bgImageBox" class="hidden">
@@ -791,10 +855,10 @@
           </div>
           <div class="card hidden" id="subjectCard">
             <h4>Subject</h4>
-            <div class="slider-row"><label>Scale <b id="subScaleV">100%</b></label><input type="range" id="subScale" min="20" max="200" value="100"></div>
-            <div class="slider-row"><label>Rotation <b id="subRotV">0°</b></label><input type="range" id="subRot" min="-45" max="45" value="0"></div>
-            <div class="slider-row"><label>Position X <b id="subXV">0%</b></label><input type="range" id="subX" min="-40" max="40" value="0"></div>
-            <div class="slider-row"><label>Position Y <b id="subYV">0%</b></label><input type="range" id="subY" min="-40" max="40" value="0"></div>
+            <div class="slider-row"><label for="subScale">Scale <b id="subScaleV">100%</b></label><input type="range" id="subScale" min="20" max="200" value="100"></div>
+            <div class="slider-row"><label for="subRot">Rotation <b id="subRotV">0°</b></label><input type="range" id="subRot" min="-45" max="45" value="0"></div>
+            <div class="slider-row"><label for="subX">Position X <b id="subXV">0%</b></label><input type="range" id="subX" min="-40" max="40" value="0"></div>
+            <div class="slider-row"><label for="subY">Position Y <b id="subYV">0%</b></label><input type="range" id="subY" min="-40" max="40" value="0"></div>
             <div class="row" style="margin-top:10px"><button class="btn small ghost" id="btnSubReset">Reset</button></div>
           </div>
           <div class="card hidden" id="jpegWarn">
@@ -810,15 +874,15 @@
             <div class="radio on" data-sh="off"><span class="r"></span>Off</div>
             <div class="radio" data-sh="on"><span class="r"></span>On</div>
             <div id="shadowCtrls" class="hidden">
-              <div class="slider-row"><label>Opacity <b id="shOpV">40%</b></label><input type="range" id="shOp" min="0" max="100" value="40"></div>
-              <div class="slider-row"><label>Blur <b id="shBlurV">18px</b></label><input type="range" id="shBlur" min="0" max="60" value="18"></div>
-              <div class="slider-row"><label>Distance <b id="shDistV">12px</b></label><input type="range" id="shDist" min="0" max="60" value="12"></div>
+              <div class="slider-row"><label for="shOp">Opacity <b id="shOpV">40%</b></label><input type="range" id="shOp" min="0" max="100" value="40"></div>
+              <div class="slider-row"><label for="shBlur">Blur <b id="shBlurV">18px</b></label><input type="range" id="shBlur" min="0" max="60" value="18"></div>
+              <div class="slider-row"><label for="shDist">Distance <b id="shDistV">12px</b></label><input type="range" id="shDist" min="0" max="60" value="12"></div>
             </div>
           </div>
           <div class="card">
             <h4>Edge</h4>
-            <div class="slider-row"><label>Feather <b id="featherV">1px</b></label><input type="range" id="feather" min="0" max="10" value="1"></div>
-            <div class="slider-row"><label>Defringe <b id="defringeV">0</b></label><input type="range" id="defringe" min="0" max="10" value="0"></div>
+            <div class="slider-row"><label for="feather">Feather <b id="featherV">1px</b></label><input type="range" id="feather" min="0" max="10" value="1"></div>
+            <div class="slider-row"><label for="defringe">Defringe <b id="defringeV">0</b></label><input type="range" id="defringe" min="0" max="10" value="0"></div>
           </div>
         </div>
 
@@ -831,64 +895,70 @@
           </div>
           <div class="card">
             <h4>Checkerboard</h4>
-            <div class="slider-row"><label>Cell size <b id="cellV">16px</b></label><input type="range" id="cellSize" min="10" max="40" value="16"></div>
+            <div class="slider-row"><label for="cellSize">Cell size <b id="cellV">16px</b></label><input type="range" id="cellSize" min="10" max="40" value="16"></div>
           </div>
           <p class="tip">Canvas controls affect framing and preview only — never the stored mask.</p>
         </div>
       </aside>
     </div>
 
-    <nav id="mobileNav">
-      <button class="on" data-tool="remove"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg></span>Remove</button>
-      <button data-tool="refine"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg></span>Refine</button>
-      <button data-tool="background"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg></span>Backgrnd</button>
-      <button data-tool="effects"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.7l5.66 5.66a8 8 0 1 1-11.31 0z"/></svg></span>Effects</button>
-      <button data-tool="canvas"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6.13 1L6 16a2 2 0 0 0 2 2h15"/><path d="M1 6.13L16 6a2 2 0 0 1 2 2v15"/></svg></span>Canvas</button>
+    <nav id="mobileNav" aria-label="Editing tools">
+      <button class="on" data-tool="remove" aria-pressed="true"><span class="ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg></span>Remove</button>
+      <button data-tool="refine" aria-pressed="false"><span class="ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg></span>Refine</button>
+      <button data-tool="background" aria-pressed="false"><span class="ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg></span>Backgrnd</button>
+      <button data-tool="effects" aria-pressed="false"><span class="ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 2.7l5.66 5.66a8 8 0 1 1-11.31 0z"/></svg></span>Effects</button>
+      <button data-tool="canvas" aria-pressed="false"><span class="ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M6.13 1L6 16a2 2 0 0 0 2 2h15"/><path d="M1 6.13L16 6a2 2 0 0 1 2 2v15"/></svg></span>Canvas</button>
     </nav>
 </section>
 
 <section class="view" id="view-batch">
   <div class="batch-head">
-    <button class="iconbtn" data-goto="landing">←</button>
+    <button class="iconbtn" data-goto="landing" aria-label="Back to landing">←</button>
     <h2>Batch</h2>
     <span class="pill">Batch lands in a later update</span>
     <div class="spacer" style="flex:1"></div>
     <button class="btn small" id="btnBatchAdd">Add images</button>
     <button class="btn small primary" id="btnBatchExport">Export all</button>
   </div>
-  <div style="padding:10px 22px 0;color:var(--muted);font-size:12.5px">Processed: <b style="color:var(--text)" id="batchCount">8 / 12</b></div>
+  <!-- Empty on purpose: the real counter is written from the actual queue, never
+       shipped as a fabricated "8 / 12". -->
+  <div style="padding:10px 22px 0;color:var(--muted);font-size:12.5px">Processed: <b style="color:var(--text)" id="batchCount"></b></div>
   <div class="batch-grid" id="batchGrid"></div>
 </section>
 
 <div id="exportWrap">
   <div class="scrim" data-close-export></div>
-  <div id="exportDrawer">
-    <button class="iconbtn x" data-close-export>✕</button>
-    <h2>Export</h2>
+  <div id="exportDrawer" role="dialog" aria-modal="true" aria-labelledby="expDrawerTitle">
+    <button class="iconbtn x" data-close-export aria-label="Close export settings">✕</button>
+    <h2 id="expDrawerTitle">Export</h2>
     <p class="tip">Settings, not just a download link.</p>
     <div class="cap2">FORMAT</div>
     <div class="fmtgrid">
-      <button class="fmt on" data-fmt="PNG">PNG</button>
-      <button class="fmt" data-fmt="WebP">WebP</button>
-      <button class="fmt" data-fmt="JPEG">JPEG</button>
-      <button class="fmt" data-fmt="AVIF">AVIF</button>
+      <button class="fmt on" data-fmt="PNG" aria-pressed="true">PNG</button>
+      <button class="fmt" data-fmt="WebP" aria-pressed="false">WebP</button>
+      <button class="fmt" data-fmt="JPEG" aria-pressed="false">JPEG</button>
+      <button class="fmt" data-fmt="AVIF" aria-pressed="false">AVIF</button>
     </div>
     <div class="cap2">RESOLUTION</div>
-    <div class="radio on" id="resOrig"><span class="r"></span>Original</div>
-    <div class="dims" id="expDims">4032 × 3024 · PNG · transparent</div>
-    <div class="radio" id="resCustom"><span class="r"></span>Custom…</div>
+    <div role="radiogroup" aria-label="Export resolution">
+      <div class="radio on" id="resOrig" role="radio" aria-checked="true" tabindex="0"><span class="r" aria-hidden="true"></span>Original</div>
+      <div class="dims" id="expDims">4032 × 3024 · PNG · transparent</div>
+      <div class="radio" id="resCustom" role="radio" aria-checked="false" tabindex="0"><span class="r" aria-hidden="true"></span>Custom…</div>
+    </div>
     <div id="resCustomBox" class="hidden">
       <div class="row" style="margin-top:8px">
         <input class="field" id="resW" type="number" min="1" max="8192" inputmode="numeric" style="flex:1;min-width:0;margin-top:0" aria-label="Export width" />
-        <span style="align-self:center;color:var(--faint)">×</span>
+        <span style="align-self:center;color:var(--faint)" aria-hidden="true">×</span>
         <input class="field" id="resH" type="number" min="1" max="8192" inputmode="numeric" style="flex:1;min-width:0;margin-top:0" aria-label="Export height" />
       </div>
-      <button class="mini" id="resLock">Aspect locked</button>
+      <button class="mini" id="resLock" aria-pressed="true">Aspect locked</button>
       <div class="dims" id="resNote"></div>
     </div>
     <div class="cap2">BACKGROUND</div>
-    <div class="radio on" id="expBgTransparent" role="radio" aria-checked="true" tabindex="0"><span class="r"></span>Transparent</div>
-    <div class="radio" id="expBgCurrent" role="radio" aria-checked="false" tabindex="0"><span class="r"></span>Current background</div>
+    <div role="radiogroup" aria-label="Export background">
+      <div class="radio on" id="expBgTransparent" role="radio" aria-checked="true" tabindex="0"><span class="r" aria-hidden="true"></span>Transparent</div>
+      <div class="radio" id="expBgCurrent" role="radio" aria-checked="false" tabindex="0"><span class="r" aria-hidden="true"></span>Current background</div>
+    </div>
     <p class="tip" id="expBgNote"></p>
     <div class="progress hidden" id="expProgWrap" style="margin-top:16px"><i id="expBar"></i></div>
     <div class="row" style="margin-top:16px"><button class="btn primary" id="btnDoExport">Export PNG</button></div>
@@ -898,26 +968,34 @@
 
 <div id="confirmWrap">
   <div class="scrim" data-no-confirm></div>
-  <div id="confirmBox" role="alertdialog" aria-modal="true" aria-labelledby="confirmTitle" aria-describedby="confirmBody">
+  <!-- role="dialog", not alertdialog: the message is not urgent and nothing
+       inside interrupts; alertdialog would also demand an assertive live region
+       that a static, pre-rendered dialog cannot provide honestly. -->
+  <div id="confirmBox" role="dialog" aria-modal="true" aria-labelledby="confirmTitle" aria-describedby="confirmBody">
     <h2 id="confirmTitle">Are you sure?</h2>
     <p id="confirmBody"></p>
     <div class="row" style="margin-top:18px">
-      <button class="btn ghost" data-no-confirm>Cancel</button>
-      <button class="btn primary" id="confirmOk">Confirm</button>
+      <button class="btn ghost" id="confirmCancel" data-no-confirm>Cancel</button>
+      <!-- btn.danger in the markup, not just the class main.ts adds at runtime:
+           with `primary` still in the class list, .btn.primary:hover (equal
+           specificity to .btn.danger, and the only rule declaring a background
+           at that weight) won the hover and painted the destructive confirm
+           mint green. -->
+      <button class="btn danger" id="confirmOk">Confirm</button>
     </div>
   </div>
 </div>
 
 <div id="reportWrap">
-  <div class="scrim" data-close-report></div></oldString>
-  <div id="reportDrawer">
-    <button class="iconbtn x" data-close-report>✕</button>
-    <h2>Report an issue</h2>
+  <div class="scrim" data-close-report></div>
+  <div id="reportDrawer" role="dialog" aria-modal="true" aria-labelledby="repDrawerTitle">
+    <button class="iconbtn x" data-close-report aria-label="Close issue report">✕</button>
+    <h2 id="repDrawerTitle">Report an issue</h2>
     <p class="tip">Opens a prefilled GitHub draft — you review and submit there. Nothing sends automatically.</p>
     <div class="cap2">TITLE (OPTIONAL)</div>
-    <input class="field" id="repTitle" maxlength="200" placeholder="Leave blank to write on GitHub" />
+    <input class="field" id="repTitle" maxlength="200" placeholder="Leave blank to write on GitHub" aria-label="Issue title (optional)" />
     <div class="cap2">WHAT HAPPENED (OPTIONAL)</div>
-    <textarea class="field" id="repBody" placeholder="What happened? Leave blank to write on GitHub"></textarea>
+    <textarea class="field" id="repBody" placeholder="What happened? Leave blank to write on GitHub" aria-label="What happened (optional)"></textarea>
     <details>
       <summary>Diagnostics attached (no image pixels)</summary>
       <pre id="diagPre"></pre>
@@ -927,8 +1005,8 @@
   </div>
 </div>
 
-<div id="localPop">
-  <h4>LOCAL PROCESSING</h4>
+<div id="localPop" role="dialog" aria-labelledby="localPopTitle">
+  <h4 id="localPopTitle">LOCAL PROCESSING</h4>
   <p>Your image is processed on this device. Images are not uploaded to an RMBG server. The AI model was downloaded separately and is stored in this browser's cache.</p>
   <p id="localBackendLine" style="color:var(--muted)"></p>
 </div>
@@ -941,16 +1019,21 @@
   </div>
 </div>
 
-<div id="toasts"></div>
+<div id="toasts" role="status" aria-live="polite" aria-atomic="true"></div>
 <script>
 "use strict";
 const $=s=>document.querySelector(s), $$=s=>Array.from(document.querySelectorAll(s));
 const MOCK=" (not yet available)";
 
 /* toasts */
+/* Errors are assertive and self-announcing: the polite container alone left
+   "Export failed" / "Model start failed" silent to a screen reader, and toasts
+   auto-vanish at 2.6 s, so there is no second chance to read one. */
 function toast(msg,err){
   const t=document.createElement("div");
-  t.className="toast"+(err?" err":""); t.textContent=msg;
+  t.className="toast"+(err?" err":"");
+  if(err){t.setAttribute("role","alert");t.setAttribute("aria-live","assertive");}
+  t.textContent=msg;
   $("#toasts").appendChild(t);
   setTimeout(()=>{t.classList.add("out"); setTimeout(()=>t.remove(),350)},2600);
 }
@@ -978,18 +1061,28 @@ $("#btnChoose").onclick=()=>fi.click();
 dz.onclick=e=>{if(e.target!==fi)fi.click();};
 dz.onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();fi.click();}};
 ["dragover","dragenter"].forEach(ev=>dz.addEventListener(ev,e=>{e.preventDefault();dz.classList.add("drag");}));
-["dragleave","drop"].forEach(ev=>dz.addEventListener(ev,e=>{e.preventDefault();dz.classList.remove("drag");}));
+/* dragleave fires for every child crossing the zone, so a naive toggle stripped
+   .drag while the file was still over the dropzone. relatedTarget tells us the
+   pointer is still inside; depth counting would too. */
+dz.addEventListener("dragleave",e=>{if(dz.contains(e.relatedTarget))return; dz.classList.remove("drag");});
 dz.addEventListener("drop",e=>{
+  e.preventDefault(); dz.classList.remove("drag");
   const f=e.dataTransfer.files&&e.dataTransfer.files[0];
-  if(f) loadFile(f); else startPreparing(true);
+  if(f) loadFile(f); else window.startPreparing?.(true);
 });
 fi.onchange=()=>{if(fi.files[0])loadFile(fi.files[0]);};
+/* Without this, a file dropped anywhere that is not #dropzone or the batch grid
+   let the browser navigate to it — which unloads the page and destroys the
+   in-memory session. Swallow the navigation only; no routing, no logic: both
+   real drop targets are inner handlers that already ran. */
+document.addEventListener("dragover",e=>e.preventDefault());
+document.addEventListener("drop",e=>e.preventDefault());
 document.addEventListener("paste",e=>{
   if(!$("#view-landing").classList.contains("on"))return;
   const item=Array.from(e.clipboardData.items||[]).find(i=>i.type.startsWith("image/"));
   if(item)loadFile(item.getAsFile());
 });
-$("#btnSample").onclick=()=>startPreparing(true);
+$("#btnSample").onclick=()=>window.startPreparing?.(true);
 $("#btnBatch").onclick=()=>toast("Batch processing lands in a later update");
 
 /* ingest (preview only) */
@@ -1003,35 +1096,26 @@ function loadFile(f){
     $("#dimLbl").textContent=img.naturalWidth+" × "+img.naturalHeight;
     $("#expDims").textContent=img.naturalWidth+" × "+img.naturalHeight+" · PNG · transparent";
     img.style.display="block"; $("#demoSubject").style.display="none";
-    startPreparing(false);
+    window.startPreparing?.(false);
   };
   img.src=uploadedURL;
 }
 
-/* preparing */
-let prepTimer=null;
-function startPreparing(withDemo){
-  showView("view-preparing");
-  const bar=$("#prepBar"), mb=$("#prepMB"), pct=$("#prepPct");
-  let v=0; clearInterval(prepTimer);
-  $("#prepRing").style.display="block"; $("#prepTitle").textContent="Preparing local AI…";
-  prepTimer=setInterval(()=>{
-    v=Math.min(120,v+Math.random()*9+3);
-    bar.style.width=(v/120*100)+"%";
-    mb.textContent=Math.floor(v)+" MB"; pct.textContent=Math.floor(v/120*100)+"%";
-    if(v>=120){clearInterval(prepTimer); finishPreparing();}
-  },140);
-}
-function finishPreparing(){
-  $("#prepTitle").textContent="Ready — local model cached";
-  setTimeout(()=>{showView("view-editor"); runScan("Detecting subject…"); setTimeout(()=>$("#fb").classList.add("on"),3200);},450);
-}
-$("#btnPrepCancel").onclick=()=>{clearInterval(prepTimer);showView("view-landing");};
+/* preparing
+   The mock timer that used to live here is gone: it invented megabytes and a
+   percentage on a 140 ms interval (`v = min(120, v + random()*9 + 3)`) and then
+   declared the model ready, so the progress bar reported a number nobody
+   measured and the download was a lie. src/main.ts owns the whole flow
+   (realStart / W.startPreparing) and reports only measured bytes; every shell
+   call site is an optional call so it is a no-op until the module loads. */
+$("#btnPrepCancel").onclick=()=>showView("view-landing");
 
 /* tool switching */
 function setTool(name){
-  $$(".tool[data-tool]").forEach(b=>b.classList.toggle("on",b.dataset.tool===name));
-  $$("#mobileNav button").forEach(b=>b.classList.toggle("on",b.dataset.tool===name));
+  $$(".tool[data-tool]").forEach(b=>{const on=b.dataset.tool===name;
+    b.classList.toggle("on",on); b.setAttribute("aria-pressed",String(on));});
+  $$("#mobileNav button").forEach(b=>{const on=b.dataset.tool===name;
+    b.classList.toggle("on",on); b.setAttribute("aria-pressed",String(on));});
   $$(".ctx .panel").forEach(p=>p.classList.toggle("on",p.id==="p-"+name));
   brushMode=(name==="refine"&&subBrush!=="guided"&&subBrush!=="recompute");
   $("#stage").classList.toggle("brushing",brushMode);
@@ -1054,7 +1138,10 @@ $$("[data-br]").forEach(b=>b.onclick=()=>{
   brushMode=(subBrush==="erase"||subBrush==="restore");
   $("#stage").classList.toggle("brushing",brushMode);
   if(!brushMode)hideBrushRing();
-  toast(subBrush==="guided"?"Guided: click an area"+MOCK:subBrush==="recompute"?"Drag a box, then Recompute"+MOCK:(subBrush==="restore"?"Restore brush ready":"Erase brush ready"));
+  /* No "not yet available" toast for guided/recompute: both are implemented
+     (guidedApply / recomputeApply in src/main.ts, which owns #guidedCard,
+     #recompCard and #btnRecompGo). The erase/restore hint stays. */
+  if(subBrush==="erase"||subBrush==="restore")toast(subBrush==="restore"?"Restore brush ready":"Erase brush ready");
 });
 $$("[data-g]").forEach(b=>b.onclick=()=>{$$("[data-g]").forEach(x=>x.classList.toggle("on",x===b)); toast("Guided region selected"+MOCK);});
 /* #btnRecompGo has no shell handler: src/main.ts owns that flow and starts/stops
@@ -1075,13 +1162,22 @@ $$("[data-bg]").forEach(b=>b.onclick=()=>{
   $("#checker").style.background=v==="color"?$("#bgColor").value:"";
   $("#checker").style.backgroundSize=v==="color"?"auto":"";
 });
-$("#bgColor").oninput=e=>{$("#bgHex").textContent=e.target.value.toUpperCase(); $("#checker").style.background=e.target.value;};
+$("#bgColor").oninput=e=>{$("#bgHex").textContent=e.target.value.toUpperCase(); $("#checker").style.background=e.target.value; syncSwatches(e.target.value);};
 $$(".sw").forEach(s=>s.onclick=()=>{
   $$(".sw").forEach(x=>x.classList.toggle("on",x===s));
   $("#bgColor").value=s.dataset.c; $("#bgHex").textContent=s.dataset.c.toUpperCase();
-  $("#checker").style.background=s.dataset.c;
+  $("#checker").style.background=s.dataset.c; syncSwatches(s.dataset.c);
 });
-$("#btnBgUpload").onclick=()=>toast("Background upload"+MOCK);
+/* .sw is a real radio group now (was 26px unfocusable <span>s): mirror the
+   selection so assistive tech is told which preset is chosen, not just which
+   one has a white ring. */
+function syncSwatches(hex){
+  $$(".sw").forEach(x=>{const on=x.dataset.c===hex;
+    x.classList.toggle("on",on); x.setAttribute("aria-checked",String(on));});
+}
+/* #btnBgUpload has NO shell handler: src/main.ts adds its own click listener
+   that opens a real file picker, so the shell's onclick fired in the same
+   gesture and answered the user's action with "not yet available". */
 $$("[data-sh]").forEach(r=>r.onclick=()=>{
   $$("[data-sh]").forEach(x=>x.classList.toggle("on",x===r));
   $("#shadowCtrls").classList.toggle("hidden",r.dataset.sh!=="on");
@@ -1126,7 +1222,11 @@ function setZoom(z){zoom=Math.min(4,Math.max(.1,z)); applyT(); $("#zoomLbl").tex
 $("#zoomIn").onclick=()=>setZoom(zoom*1.2);
 $("#zoomOut").onclick=()=>setZoom(zoom/1.2);
 $("#zoomFit").onclick=()=>fitZoom(true);
-stage.addEventListener("wheel",e=>{e.preventDefault(); setZoom(zoom*(e.deltaY<0?1.1:0.9));},{passive:false});
+/* Ctrl/Cmd + wheel is the browser's zoom gesture everywhere else on the page;
+   swallowing it here meant the user had no zoom at all. */
+stage.addEventListener("wheel",e=>{
+  if(e.ctrlKey||e.metaKey)return;
+  e.preventDefault(); setZoom(zoom*(e.deltaY<0?1.1:0.9));},{passive:false});
 function ptsMid(){const p=[...pointers.values()];return {x:(p[0].x+p[1].x)/2,y:(p[0].y+p[1].y)/2};}
 function ptsDist(){const p=[...pointers.values()];return Math.hypot(p[0].x-p[1].x,p[0].y-p[1].y);}
 stage.addEventListener("pointerdown",e=>{
@@ -1164,7 +1264,16 @@ function endPointer(e){
 stage.addEventListener("pointerup",endPointer);
 stage.addEventListener("pointercancel",endPointer);
 stage.addEventListener("dblclick",()=>fitZoom(true));
-document.addEventListener("keydown",e=>{if(e.code==="Space"&&$("#view-editor").classList.contains("on")){spaceDown=true;e.preventDefault();}});
+/* Space pans the stage, but Space is also the activation key for every control
+   in the editor — including #removeSwitch (role="switch") and all five compare
+   radios. preventDefault() ran for ANY event, so Space did nothing on any of
+   them, and keyup could land outside the listener leaving spaceDown stuck. Bail
+   out whenever the event came from something interactive. */
+document.addEventListener("keydown",e=>{
+  if(e.code!=="Space"||!$("#view-editor").classList.contains("on"))return;
+  if(e.target.closest&&e.target.closest('button,input,select,textarea,a,[role="switch"],[role="radio"],[tabindex]'))return;
+  spaceDown=true;e.preventDefault();
+});
 document.addEventListener("keyup",e=>{if(e.code==="Space")spaceDown=false;});
 
 /* compare modes */
@@ -1176,7 +1285,12 @@ var compareMode="after";
    setCompare, and this used to be a dead copy that also poked #maskView. The
    .seg handlers below resolve setCompare at click time, so they now land on
    the real implementation (including the new Overlay mode). */
-$$(".seg button").forEach(b=>b.onclick=()=>setCompare(b.dataset.view));
+$$(".seg button").forEach(b=>b.onclick=()=>{
+  setCompare(b.dataset.view);
+  /* realCompare owns .on but knows nothing about the radiogroup; step the
+     checked state in the same gesture so the group never lies. */
+  $$(".seg button").forEach(x=>x.setAttribute("aria-checked",String(x===b)));
+});
 /* split drag */
 (()=>{const div=$("#splitDiv"),ui=$("#splitUI");let drag=false;
 div.addEventListener("pointerdown",e=>{drag=true;div.setPointerCapture(e.pointerId);});
@@ -1229,8 +1343,11 @@ localBtn.onclick=e=>{
   localPop.style.left=Math.min(r.left,innerWidth-310)+"px";
   localPop.style.top=(r.top-150)+"px";
   localPop.classList.toggle("on");
+  localBtn.setAttribute("aria-expanded",String(localPop.classList.contains("on")));
 };
-document.addEventListener("click",e=>{if(!localPop.contains(e.target))localPop.classList.remove("on");});
+document.addEventListener("click",e=>{
+  if(!localPop.contains(e.target)){localPop.classList.remove("on"); localBtn.setAttribute("aria-expanded","false");}
+});
 
 /* feedback bubble */
 $("#fbFine").onclick=()=>{$("#fb").classList.remove("on");toast("Thanks — kept locally");};
@@ -1244,48 +1361,80 @@ $("#fbFix").onclick=()=>{$("#fb").classList.remove("on");setTool("refine");toast
 const expWrap=$("#exportWrap");
 $("#btnExport").onclick=()=>expWrap.classList.add("on");
 $$("[data-close-export]").forEach(b=>b.onclick=()=>expWrap.classList.remove("on"));
+/* role="radio" + tabindex without a key handler is keyboard-dead: Enter/Space on
+   a <div> never synthesises click. Bridge them to a click so the real handlers
+   (src/main.ts wireExportDrawer) still do the work. Harmless for the two
+   background radios, which already have their own keydown — `pick()` is
+   idempotent. */
+$$("#exportWrap [role=radio]").forEach(el=>el.addEventListener("keydown",e=>{
+  if(e.key!=="Enter"&&e.key!==" ")return;
+  e.preventDefault(); el.click();
+}));
+/* src/main.ts drives the selection state for these groups by toggling `.on` (and
+   #resLock's label) and has no reason to touch ARIA. Mirror that state here so
+   the ARIA added in the markup cannot go stale: a role that reports the wrong
+   checked/pressed value is worse than having no role at all. */
+$$(".fmt").forEach(b=>b.onclick=()=>$$(".fmt").forEach(x=>x.setAttribute("aria-pressed",String(x===b))));
+new MutationObserver(()=>{
+  $("#resLock").setAttribute("aria-pressed",String($("#resLock").textContent==="Aspect locked"));
+}).observe($("#resLock"),{childList:true,characterData:true,subtree:true});
+const syncResRadios=()=>{
+  $("#resOrig").setAttribute("aria-checked",String($("#resOrig").classList.contains("on")));
+  $("#resCustom").setAttribute("aria-checked",String($("#resCustom").classList.contains("on")));
+};
+new MutationObserver(syncResRadios).observe($("#resOrig"),{attributes:true,attributeFilter:["class"]});
+new MutationObserver(syncResRadios).observe($("#resCustom"),{attributes:true,attributeFilter:["class"]});
+new MutationObserver(()=>$$(".sw").forEach(x=>x.setAttribute("aria-checked",String(x.classList.contains("on")))))
+  .observe($("#bgColorBox"),{subtree:true,attributes:true,attributeFilter:["class"]});
 
-/* batch (mock tiles) */
-const batchStates=[["ok","✓"],["ok","✓"],["run","62%"],["run","31%"],["wait","queued"],["wait","queued"],["wait","queued"],["err","failed"],["ok","✓"],["ok","✓"],["wait","queued"],["wait","queued"]];
-function renderBatch(animate){
-  const g=$("#batchGrid");g.innerHTML="";
-  let done=0;
-  batchStates.forEach((s,i)=>{
-    const d=document.createElement("div");d.className="bthumb";
-    d.innerHTML=`<div class="im" style="background:${i%3?"linear-gradient(135deg,#2a3540,#171d23)":"conic-gradient(#22282e 0 25%,#161b20 0 50%,#22282e 0 75%,#161b20 0);background-size:14px 14px"}">
-      <svg width="64" height="64" viewBox="0 0 120 120"><circle cx="60" cy="42" r="20" fill="#c8cfd5"/><rect x="34" y="66" width="52" height="44" rx="14" fill="#c8cfd5"/></svg>
-      <span class="badge ${s[0]}" style="position:absolute;top:8px;left:8px">${s[1]}</span></div>
-      <div class="meta"><span>img-${String(i+1).padStart(2,"0")}.jpg</span><span>${(2+i%5)}.${i%9} MB</span></div>
-      <div class="bar"><i style="width:${s[0]==="ok"?100:s[0]==="run"?parseInt(s[1]):0}%"></i></div>`;
-    d.onclick=()=>{showView("view-editor");toast("Opened in editor"+MOCK);};
-    g.appendChild(d); if(s[0]==="ok")done++;
-  });
-  $("#batchCount").textContent=done+" / "+batchStates.length;
-  if(animate){
-    $$("#batchGrid .bar i").forEach((b,i)=>{b.style.width="0";setTimeout(()=>{b.style.transition="width 1.6s ease";b.style.width=(batchStates[i][0]==="err"?0:100)+"%";},i*120);});
-  }
-}
-$("#btnBatchAdd").onclick=()=>toast("File picker"+MOCK);
-$("#btnBatchExport").onclick=()=>toast("Exporting batch as .zip"+MOCK);
+/* batch — no grid rendering here.
+   renderBatch() + batchStates painted twelve invented tiles with fabricated
+   filenames, sizes and 62%/31% progress bars; the click handler even claimed
+   to open a fake item in the editor. src/main.ts renders the real queue (it
+   calls renderBatch() itself on boot), so the shell only asks for it if the
+   module already installed one. */
+window.renderBatch?.();
 
 /* shortcuts */
 document.addEventListener("keydown",e=>{
   const ed=$("#view-editor").classList.contains("on");
+  const t=e.target;
+  const typing=t&&(t.tagName==="INPUT"||t.tagName==="TEXTAREA"||t.tagName==="SELECT"||t.isContentEditable);
+  /* Escape is checked BEFORE the typing guard below, so it also works while the
+     report drawer's #repTitle/#repBody has focus — which is where it is most
+     needed, and where the old order meant it could never reach. */
+  if(e.key==="Escape"){expWrap.classList.remove("on");localPop.classList.remove("on");}
+  /* Typing in a field must never drive the app. The old guard sat AFTER the
+     Ctrl+Z branch and only excluded INPUT, so Ctrl+Z inside #repBody popped the
+     mask history instead of undoing text, and 1-5/B/[/] fired while typing. */
+  if(typing)return;
   if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="z"){e.preventDefault();(e.shiftKey?$("#btnRedo"):$("#btnUndo")).click();return;}
-  if(!ed||e.target.tagName==="INPUT")return;
+  if(!ed)return;
   const tools={1:"remove",2:"refine",3:"background",4:"effects",5:"canvas"};
   if(tools[e.key])setTool(tools[e.key]);
   if(e.key.toLowerCase()==="b")setCompare(compareMode==="before"?"after":"before");
   if(e.key==="["){$("#brushSize").value=Math.max(4,+$("#brushSize").value-8);$("#brushSize").dispatchEvent(new Event("input"));}
   if(e.key==="]"){$("#brushSize").value=Math.min(160,+$("#brushSize").value+8);$("#brushSize").dispatchEvent(new Event("input"));}
-  if(e.key==="Escape"){expWrap.classList.remove("on");localPop.classList.remove("on");}
 });
 
 /* init */
-renderBatch(false);
 applyT();sizePaint();
-document.addEventListener("keydown",e=>{if(e.key==="?"&&$("#view-editor").classList.contains("on"))toast("1–5 tools · B compare · [ ] brush · Space pan");});
+document.addEventListener("keydown",e=>{
+  if(e.key!=="?"||!$("#view-editor").classList.contains("on"))return;
+  if(e.target.closest&&e.target.closest("input,textarea,select,[contenteditable]"))return;
+  toast("1–5 tools · B compare · [ ] brush · Space pan");
+});
 </script>
 <script type="module" src="/src/main.ts"></script>
+<noscript>
+  <!-- The FAQ heading and all ten <details> are .reveal, which ships at
+       opacity:0 and is only un-hidden by main.ts's IntersectionObserver. With
+       no JS — or a failed module load — the whole FAQ was invisible, on a page
+       whose entire premise is that it works offline. -->
+  <div style="position:fixed;inset:auto 0 0 0;z-index:200;background:var(--panel2);
+    border-top:1px solid var(--border);padding:14px 18px;color:var(--text);
+    font-size:13px;text-align:center">This app needs JavaScript: the background model runs in your browser, so there is nothing to show without it.</div>
+  <style>.reveal{opacity:1;transform:none}</style>
+</noscript>
 </body>
 </html>
