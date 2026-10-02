@@ -4,7 +4,7 @@
 
 ## Status
 - Docs: `README.md`, `SPEC.md`, `CONTRIBUTING.md`, `CONTRIBUTORS.md`, `LICENSE` (MIT).
-- `packages/engine` — pure-TS cutout engine, DOM-free. Test: `npx vitest run` in `packages/engine`.
+- `packages/engine` — pure-TS cutout engine, DOM-free. Test: `npx vitest run` in `packages/engine` (41 tests).
 - `packages/app` — Vite app (mockup shell + real S1 wiring). Dev: `npx vite` in `packages/app`. Build: `npm run build --workspace @rmbg/app`. Serve built app: untracked `serve.bat` (localhost:8901).
 - Typecheck is a gate: `npm run typecheck --workspace @rmbg/engine` / `--workspace @rmbg/app`.
   The app `build` runs `tsc --noEmit` first, so a type error fails the deploy.
@@ -36,6 +36,13 @@
 - A crashed worker is latched via `workerDead`; `callWorker` then rejects
   immediately. Never remove that latch — a terminated worker silently drops
   `postMessage`, so without it every later request hangs forever.
+- The app has ONE editing session (`state`). Anything that replaces it (opening
+  a batch item) destroys the mask, the whole `OpLog`, the finishing params and
+  the previous preview URL, with no undo. Route it through `confirmAction()`.
+- Compare modes: `after` | `before` | `split` | `overlay` | `mask`, all driven by
+  `renderDisplay`. `split` and `overlay` are inspect-only (`guardSplit`,
+  `__rmbgSplitLock`) — painting onto a tinted or side-by-side view would land
+  against pixels the user cannot see.
 
 ## Working agreement
 - Prefer executable sources of truth (`package.json` scripts, `Makefile`, CI workflows) over prose once they exist.

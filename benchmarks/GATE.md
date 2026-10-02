@@ -64,6 +64,21 @@ engine's own maths is untouched apart from being deduplicated.
 | `Engine.applyBrush`/`refineEdges` were dead (app called raw fns). Both now share one implementation (`OpLog.applyBrush`, `refineEdges`). | +5 engine tests (35 total, all green) |
 | No `tsc` gate — `vite build` never typechecked. Both packages now typecheck, and the app `build` runs `tsc --noEmit` first. | `npm run build` fails on a type error |
 
+## Overlay view, session-loss guard, dead-code sweep (2026-10-02)
+
+Follow-up to the same review. 41 engine tests, 27 targeted browser checks and a
+23-check regression pass over the fixes above are green.
+
+| Fix | Evidence |
+|---|---|
+| `#btnOverlay` only toggled a CSS class and toasted "Overlay on/off" — the SPEC §3.3 overlay view did not exist (`renderDisplay` had no `overlay` branch). Replaced by a real fifth compare mode built on a new pure engine fn `compositeOverlay` (foreground untouched, background veiled toward a red tint, continuous across partial alpha, always opaque — inspection only, never an export path). | exact blend arithmetic verified: base (2.55, 90, 197.3) veiled 0.55 → (138, 103, 151); mask-1 pixel stays (128, 90, 100) |
+| Opening a batch item silently replaced the single global editor session — image, mask, entire undo history, effects, background, and the previous preview URL — with no undo and no warning. Now asks first via a promise-based confirm modal (danger-styled, Escape = cancel, safe choice focused) naming the exact cost. | prompt appears only with unsaved work; cancel/Escape keep `state.image`; confirm replaces it |
+| The editor had no route back to the queue (Back and New image both go to landing; the only Batch button is on the landing page). Added a "Batch queue" rail button, shown only when the queue is non-empty (SPEC §2.6 contextual capability). | visible once items exist; clicking lands on `#view-batch` |
+| Overlay treated as inspect-only alongside Split (painting onto a tinted background would land against pixels that do not exist). | `__rmbgSplitLock` true in both, false after leaving |
+| Removing the batch baseline history entry also removed one of the two instances of the item-#1 no-op-undo defect (`commitRegion(mask, 'batch', () => null)` snapshotted the mask as its own pre-image). | adopting a mask now leaves log depth 0 instead of 1 |
+| Dead code removed: `#skel`/`.skblock`, `#statesWrap`/`#statesDrawer`, `#hqBanner` (CSS with no markup at all), `#maskView`, `#btnOverlay`, "Save state" (toast-only lie), the `[data-ai]` handler (no markup), the mock `runExport` body, the dead shell `setCompare` copy (which referenced the removed `#maskView`), `paintMove`/`paintMoveAlias`. | absent from the live CSSOM and from `window`; `.seg` now has exactly 5 modes |
+| `drawComposite` split so the scratch-canvas blit is shared by the cutout, split, overlay, export and batch-PNG paths instead of duplicated. | regression pass: cutout/split/export pixels unchanged, export still writes a real `rmbg-export-1000x400.png` |
+
 ## PENDING (need adequate hardware: real GPU or stronger CPU)
 
 - In-browser cold/warm inference numbers for the quality tier.

@@ -67,6 +67,52 @@ export function composite(
   return { width: w, height: h, rgba };
 }
 
+/** Tint used to veil background in the overlay view. Matches the app's
+ *  "erase" red so the overlay and the erase brush read as the same idea. */
+export const OVERLAY_TINT: [number, number, number] = [248, 113, 113];
+
+export interface OverlayOptions {
+  /** How strongly to veil what the mask called background: 0 = untouched
+   *  original, 1 = fully tinted. Defaults to 0.55. */
+  veil?: number;
+  /** Veil colour. Defaults to `OVERLAY_TINT`. */
+  tint?: [number, number, number];
+}
+
+/**
+ * Overlay view: the ORIGINAL pixels with the mask painted on top, so a region
+ * the AI wrongly kept reads as "this should have been removed and wasn't".
+ *
+ * Foreground is left completely untouched; background is veiled with a tint;
+ * partial alpha blends between the two, which is the whole point — hair and
+ * semi-transparent edges only read correctly if the transition is continuous
+ * rather than a hard threshold.
+ *
+ * Always fully opaque: this is an inspection view, not an export path, so it
+ * never produces an artifact. Pure function, no DOM.
+ */
+export function compositeOverlay(
+  image: ImageRef, mask: AlphaMask, opts: OverlayOptions = {},
+): CompositeResult {
+  if (image.width !== mask.width || image.height !== mask.height) {
+    throw new Error('compositeOverlay: image and mask sizes differ');
+  }
+  const { width: w, height: h } = image;
+  const veil = Math.min(1, Math.max(0, opts.veil ?? 0.55));
+  const [tr, tg, tb] = opts.tint ?? OVERLAY_TINT;
+  const rgba = new Uint8ClampedArray(w * h * 4);
+  for (let i = 0; i < w * h; i++) {
+    const a = Math.min(1, Math.max(0, mask.alpha[i]));
+    const v = veil * (1 - a);
+    const o = i * 4;
+    rgba[o] = image.rgb[i * 3] * (1 - v) + tr * v;
+    rgba[o + 1] = image.rgb[i * 3 + 1] * (1 - v) + tg * v;
+    rgba[o + 2] = image.rgb[i * 3 + 2] * (1 - v) + tb * v;
+    rgba[o + 3] = 255;
+  }
+  return { width: w, height: h, rgba };
+}
+
 /** Cover-fit an RGB image to exact dimensions (center crop). */
 function coverFit(img: ImageRef, w: number, h: number): Uint8ClampedArray {
   const scale = Math.max(w / img.width, h / img.height);

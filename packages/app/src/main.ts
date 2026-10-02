@@ -15,6 +15,8 @@ import {
   isIdentityTransform,
   refineEdges,
   transformSubject,
+  compositeOverlay,
+  type CompositeResult,
   upsampleAlphaBilinear,
   type AlphaMask,
   type Background,
@@ -433,9 +435,9 @@ function ensureSplit(img: ImageRef) {
   void img;
 }
 
-function drawComposite(target: HTMLCanvasElement, view: { image: ImageRef; mask: AlphaMask }, bg: Background, fx: Effects, maxSide = 0) {
-  const out = composite(view.image, view.mask, bg, fx);
-  // Reused scratch canvas: avoids a full-res allocation per redraw.
+/** Blit an engine CompositeResult into a canvas, via the shared `blit`
+ *  scratch canvas so each redraw does not allocate a full-res buffer. */
+function blitResult(target: HTMLCanvasElement, out: CompositeResult, maxSide = 0) {
   blit.width = out.width; blit.height = out.height;
   blit.getContext('2d')!.putImageData(
     new ImageData(out.rgba as unknown as Uint8ClampedArray<ArrayBuffer>, out.width, out.height), 0, 0,
@@ -451,7 +453,18 @@ function drawComposite(target: HTMLCanvasElement, view: { image: ImageRef; mask:
   ctx.drawImage(blit, 0, 0, dw, dh);
 }
 
+function drawComposite(target: HTMLCanvasElement, view: { image: ImageRef; mask: AlphaMask }, bg: Background, fx: Effects, maxSide = 0) {
+  blitResult(target, composite(view.image, view.mask, bg, fx), maxSide);
+}
+
 const blit = document.createElement('canvas');
+
+/** Overlay view: original pixels with the mask veiled on top, so a region the
+ *  AI wrongly kept is obvious. Uses the CANONICAL mask, not the derived view —
+ *  the point is to audit the cutout itself, not the finishing effects. */
+function drawOverlay(target: HTMLCanvasElement, img: ImageRef, mask: AlphaMask) {
+  blitResult(target, compositeOverlay(img, mask));
+}
 
 function drawMaskGray(target: HTMLCanvasElement, mask: AlphaMask) {
   const ctx = target.getContext('2d')!;
@@ -506,6 +519,10 @@ function renderDisplay() {
     up.style.display = 'none';
     resultCanvas.style.display = 'block';
     drawMaskGray(resultCanvas, state.mask);
+  } else if (lastCompare === 'overlay') {
+    up.style.display = 'none';
+    resultCanvas.style.display = 'block';
+    drawOverlay(resultCanvas, state.image, state.mask);
   } else {
     up.style.display = 'none';
     resultCanvas.style.display = 'block';
@@ -691,14 +708,18 @@ function runReveal() {
 }
 
 let splitNoteAt = 0;
-/** Split view is inspect-only: earlier paint stays, but no new marks land.
- *  Returns true when the caller must stand down. */
+/** Split and Overlay are inspect-only: earlier paint stays, but no new marks
+ *  land. Split shows two finished renders side by side; Overlay deliberately
+ *  tints the removed region, so painting on top of it would land against a
+ *  background that does not exist. Returns true when the caller must stand
+ *  down. */
 function guardSplit(): boolean {
-  if (lastCompare !== 'split') return false;
+  const label = lastCompare === 'overlay' ? 'Overlay' : 'Split';
+  if (lastCompare !== 'split' && lastCompare !== 'overlay') return false;
   const now = Date.now();
   if (now - splitNoteAt > 2500) {
     splitNoteAt = now;
-    W.toast('Exit Split view to edit');
+    W.toast(`Exit ${label} view to edit`);
   }
   return true;
 }
@@ -711,13 +732,18 @@ function realCompare(m: string) {
   // `var` but never to a script-scoped `let`. Left unsynced, `B` always
   // resolved to "before" and the second press did nothing.
   W.compareMode = m;
-  (W as any).__rmbgSplitLock = (m === 'split');
+  // The shell's stage painting must stand down in every inspect-only mode.
+  (W as any).__rmbgSplitLock = (m === 'split' || m === 'overlay');
   ($('#splitUI') as HTMLElement).classList.toggle('on', m === 'split');
   $$('.seg button').forEach((b) => (b as HTMLElement).classList.toggle('on', (b as HTMLElement).dataset.view === m));
-  if (!state.mask) { W.toast(m === 'mask' ? 'Mask: white kept · black removed' : 'Original pixels — never destroyed'); return; }
+  if (!state.mask) {
+    W.toast(m === 'mask' ? 'Mask: white kept · black removed' : 'Original pixels — never destroyed');
+    return;
+  }
   refreshDisplay();
   if (m === 'before') W.toast('Original pixels — never destroyed');
   if (m === 'mask') W.toast('Mask: white kept · black removed · gray partial');
+  if (m === 'overlay') W.toast('Overlay: kept pixels stay, removed areas are tinted red');
 }
 
 function selectedFormat(): string {
@@ -1586,6 +1612,9 @@ function renderBatch() {
     g.appendChild(d);
   });
   $('#batchCount').textContent = `${done} / ${batch.length}`;
+  // Contextual capability (SPEC §2.6): the editor only offers the queue once
+  // there is a queue to go back to.
+  ($('#btnToBatch') as HTMLElement)?.classList.toggle('hidden', batch.length === 0);
 }
 
 /** Strictly sequential: one worker, one inference at a time. */
@@ -1663,13 +1692,41 @@ async function addBatchFiles(fs: FileList | File[]): Promise<void> {
   void pumpBatch();
 }
 
+/** True when switching away from the current image would destroy work.
+ *  `state.log.depth` is the honest signal: every brush stroke, guided select,
+ *  region recompute and finishing change is one entry, and the entry carries
+ *  the pixels needed to put it back. Note it is only trustworthy because the
+ *  AI/batch baseline no longer commits a no-op entry — see openBatchItem. */
+function hasUnsavedWork(): boolean {
+  return !!state.mask && state.log.depth > 0;
+}
+
 /** Any batch item opens in the full single-image flow (same engine, same mask model). */
-function openBatchItem(it: BatchItem) {
+async function openBatchItem(it: BatchItem) {
   if (batchBusy) { W.toast('Batch is using the model — wait a few seconds', true); return; }
+  // Opening an item REPLACES the one global editor session: image, mask, undo
+  // history, effects, background and transform are all overwritten below, and
+  // the old preview URL is revoked. There is no undo for that, so never do it
+  // silently while the user has work in the session.
+  if (hasUnsavedWork() && state.image !== it.image) {
+    const n = state.log.depth;
+    const ok = await confirmAction(
+      'Discard this session?',
+      `Opening "${it.name}" replaces the image you are editing. Your cutout, `
+      + `${n} undo step${n === 1 ? '' : 's'}, effects and background will be reset, `
+      + 'and cannot be recovered.',
+      'Discard and open',
+    );
+    if (!ok) return;
+  }
   state.image = it.image;
   state.mask = it.mask
     ? { width: it.mask.width, height: it.mask.height, alpha: new Float32Array(it.mask.alpha) }
     : null;
+  // No baseline history entry for the mask we just adopted. The old code
+  // committed one with a null box, which snapshotted the mask as its own
+  // pre-image: undo reported "Undone: batch", changed nothing, and burned a
+  // slot (the same defect as the AI entry in segmentCurrent).
   state.log = new OpLog();
   state.fx = JSON.parse(JSON.stringify(FX_OFF));
   state.bg = { ...BG_TRANSPARENT };
@@ -1683,7 +1740,6 @@ function openBatchItem(it: BatchItem) {
   ensureCanvases(it.image);
   if (!finishingWired) { wireFinishing(); finishingWired = true; }
   resetExportRes();
-  if (state.mask) state.log.commitRegion(state.mask, 'batch', () => null);
   W.showView('view-editor');
   if (state.mask) {
     lastCompare = 'after';
@@ -1835,6 +1891,32 @@ const batchPicker = (() => {
 // "no analytics, no tracking, no upload" (SPEC §10). The footer keeps a plain
 // link to the repository instead.
 
+// ---------- destructive-action confirm ----------
+// One small modal for actions that destroy work the user cannot get back.
+// There is exactly one such action today (opening a batch item replaces the
+// editor session), so a shared promise-based helper is enough; no framework.
+let confirmResolve: ((v: boolean) => void) | null = null;
+
+function confirmAction(title: string, body: string, okLabel = 'Discard'): Promise<boolean> {
+  ($('#confirmTitle') as HTMLElement).textContent = title;
+  ($('#confirmBody') as HTMLElement).textContent = body;
+  const ok = $('#confirmOk') as HTMLButtonElement;
+  ok.textContent = okLabel;
+  ok.classList.toggle('danger', true);
+  ($('#confirmWrap') as HTMLElement).classList.add('on');
+  // Focus the safe choice, so Enter/Escape can never destroy work by accident.
+  const cancel = document.querySelector('#confirmWrap [data-no-confirm]:not(.scrim)') as HTMLElement | null;
+  cancel?.focus();
+  return new Promise<boolean>((resolve) => { confirmResolve = resolve; });
+}
+
+function closeConfirm(result: boolean) {
+  ($('#confirmWrap') as HTMLElement).classList.remove('on');
+  const r = confirmResolve;
+  confirmResolve = null;
+  r?.(result);
+}
+
 // ---------- issue reporter ----------
 // Toasts + window errors feed a small ring buffer so a GitHub issue draft
 // can carry real diagnostics. Pixel-free by construction: only short text.
@@ -1962,7 +2044,16 @@ document.querySelector('#landingFoot a[href*="/issues"]')?.addEventListener('cli
 });
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') ($('#reportWrap') as HTMLElement).classList.remove('on');
+  // Escape means "no" — never let it mean "destroy my work".
+  if (e.key === 'Escape' && ($('#confirmWrap') as HTMLElement).classList.contains('on')) {
+    e.preventDefault();
+    closeConfirm(false);
+  }
 });
+// Confirm dialog: scrim, Cancel and Confirm all settle the same promise, so
+// there is exactly one exit path per outcome.
+$$('[data-no-confirm]').forEach((b) => (b as HTMLElement).addEventListener('click', () => closeConfirm(false)));
+($('#confirmOk') as HTMLButtonElement).onclick = () => closeConfirm(true);
 
 $('#btnRecompute').addEventListener('click', () => { void rerun(); });
 // Real Back-cancel (overrides the mockup shell's view-only binding, which
@@ -1975,6 +2066,11 @@ $('#btnRecompute').addEventListener('click', () => { void rerun(); });
 };
 // Real batch queue (overrides the mockup shell's toast/toy tiles).
 ($('#btnBatch') as HTMLButtonElement).onclick = enterBatch;
+// The editor had no route back to the queue: Back and New image both go to the
+// landing, and the only Batch button lived there. Returning to the queue is not
+// destructive (the session stays intact), so it needs no confirmation — the
+// queue itself pauses while the editor is open (see pumpBatch).
+($('#btnToBatch') as HTMLButtonElement).onclick = enterBatch;
 ($('#btnBatchAdd') as HTMLButtonElement).onclick = () => batchPicker.click();
 ($('#btnBatchExport') as HTMLButtonElement).onclick = () => { void exportAllZIP(); };
 {

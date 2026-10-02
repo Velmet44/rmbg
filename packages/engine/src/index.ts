@@ -10,7 +10,8 @@ import { OpLog } from './history.js';
 export * from './types.js';
 export { createMask, cloneMask, boxDownsampleRGB, upsampleAlphaBilinear, packRGBA } from './mask.js';
 export { applyBrushStroke, featherInPlace, contractInPlace, refineEdges } from './ops.js';
-export { composite } from './composite.js';
+export { composite, compositeOverlay, OVERLAY_TINT, type OverlayOptions } from './composite.js';
+export type { CompositeResult } from './composite.js';
 export { OpLog } from './history.js';
 export {
   TransformersAdapter, type TransformersDevice, DEFAULT_RUNTIME_URL, RUNTIME_CACHE_NAME,

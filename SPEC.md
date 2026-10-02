@@ -82,7 +82,10 @@ The user must be able to verify quality before exporting:
 - Before / after toggle.
 - Side-by-side split comparison with movable divider.
 - Mask view: white = foreground, black = background, gray = partial/uncertain.
-- Overlay view: mask superimposed on original for finding missed regions.
+- Overlay view: mask superimposed on original for finding missed regions. Foreground
+  renders untouched, background is veiled toward a warning tint, and the transition
+  is continuous across partial alpha (hair and semi-transparent edges only read
+  correctly without a hard threshold). Inspect-only, like Split.
 - Zoom to 100% and fit-to-view. Inspection at 100% must be practical (pan, no fighting the canvas).
 
 ### 3.4 Correct
@@ -117,6 +120,10 @@ Export is a compact settings step, not just a download link:
 - Entry splits into single-image and batch paths; batch never clutters the single-image flow.
 - Batch = sequential job queue (not parallel inference): queued → processing → done/failed per item, with overall progress and per-item retry.
 - Any batch item can be opened in the full single-image flow (same engine, same mask model).
+  V1 has a single editing session, so opening an item replaces it. That is a
+  destructive action and must be confirmed, naming the cost, whenever the session
+  holds work — undo history is destroyed and cannot be recovered.
+- The editor must offer a route back to the queue without going through the landing page.
 - Batch export: individual files plus combined archive. Failures export independently without blocking the rest.
 
 ### 3.8 History

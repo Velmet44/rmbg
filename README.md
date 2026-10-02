@@ -24,10 +24,12 @@ Reloads skip the download entirely and work offline.
 ## What works today
 
 - Single-image flow: upload → remove → inspect → correct → export
+- Inspect: before/after, split with a movable divider, mask, and an overlay view that veils what was removed so you can spot what the AI wrongly kept
 - Erase/restore brushes (Apply commits, Clear discards), guided click-to-region, drag-a-box AI recompute
 - Backgrounds: transparent, solid color, custom image — with subject scale/rotation/position
 - Finishing: drop shadow, edge feather + defringe
 - One undo timeline across AI, brushes, and settings
+- Sequential batch queue with per-item retry, open-in-editor, and ZIP export
 - Original-resolution export; JPEG transparency guard (never silently flattened)
 
 ## Roadmap
@@ -40,7 +42,7 @@ and [benchmarks/GATE.md](benchmarks/GATE.md) for measured gate evidence.
 
 - Segmentation: BiRefNet-lite 512px ONNX (MIT), via Transformers.js — WebGPU fp16, WASM fallback
 - Masks are float alpha (hair and semi-transparency survive); the original pixels are never mutated
-- One swappable `SegmentationAdapter`; the engine is pure TypeScript with 35 unit tests
+- One swappable `SegmentationAdapter`; the engine is pure TypeScript with 41 unit tests
 - No backend, no analytics, no tracking — static hosting only ([ARCHITECTURE](SPEC.md#4-engine-architecture))
 
 Model provenance (revisions, licenses, checksums): [models/manifest.json](models/manifest.json).
@@ -51,7 +53,7 @@ Requires Node.js 20+.
 
 ```sh
 npm install
-npm test --workspace @rmbg/engine   # 35 unit tests, DOM-free
+npm test --workspace @rmbg/engine   # 41 unit tests, DOM-free
 cd packages/app && npx vite         # dev server
 ./serve.bat                         # build + serve production (localhost:8901)
 npm run measure --workspace @rmbg/harness -- --model=studioludens/birefnet-lite-512 --device=webgpu

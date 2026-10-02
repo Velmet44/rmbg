@@ -36,6 +36,9 @@
   .btn.primary{background:var(--accent);border-color:var(--accent);color:#06281c;font-weight:700}
   .btn.primary:hover{background:#4be0a8;box-shadow:0 4px 18px rgba(52,211,153,.35)}
   .btn.ghost{background:transparent}
+  /* destructive confirm: never green, so "Discard" can never read as "go" */
+  .btn.danger{background:var(--danger);border-color:var(--danger);color:#fff;font-weight:700}
+  .btn.danger:hover{filter:brightness(1.08)}
   .btn.small{padding:6px 10px;font-size:12.5px}
   .btn:disabled{opacity:.45;cursor:not-allowed;transform:none}
   .iconbtn{display:inline-flex;align-items:center;justify-content:center;min-width:32px;height:32px;
@@ -262,6 +265,16 @@
     background:#0d1114;border:1px solid var(--border);border-radius:8px;padding:10px;max-height:180px;
     overflow-y:auto;margin:8px 0 0}
   .hidden{display:none!important}
+  /* destructive-action confirm (opening a batch item replaces the session) */
+  #confirmWrap{position:fixed;inset:0;display:none;z-index:90}
+  #confirmWrap.on{display:block}
+  #confirmWrap .scrim{position:absolute;inset:0;background:rgba(0,0,0,.6);animation:viewIn .2s}
+  #confirmBox{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+    width:min(420px,92vw);background:var(--bg2);border:1px solid var(--border);
+    border-radius:14px;padding:20px;box-shadow:0 30px 80px rgba(0,0,0,.6)}
+  #confirmBox h2{font-size:15px;margin-bottom:2px}
+  #confirmBody{color:var(--muted);font-size:12.5px;line-height:1.6}
+  #confirmBox .row{justify-content:flex-end}
   .tip{font-size:11.5px;color:var(--faint);line-height:1.55;margin-top:10px}
   .tip b{color:var(--muted)}
 
@@ -328,31 +341,11 @@
   .bthumb .bar{position:absolute;left:0;right:0;bottom:0;height:3px;background:#0d1114}
   .bthumb .bar i{display:block;height:100%;background:var(--accent)}
 
-  /* ---------- state playground / skeleton / hq banner ---------- */
-  #statesWrap{position:fixed;inset:0;display:none;z-index:80}
-  #statesWrap.on{display:block}
-  #statesWrap .scrim{position:absolute;inset:0;background:rgba(0,0,0,.55)}
-  #statesDrawer{position:absolute;top:0;right:0;bottom:0;width:min(320px,94vw);background:var(--bg2);
-    border-left:1px solid var(--border);padding:20px 18px;overflow-y:auto;
-    animation:drawerIn .25s cubic-bezier(.2,.9,.25,1)}
-  #statesDrawer h2{font-size:15px}
-  #statesDrawer .x{float:right}
+  /* Removed: #statesWrap/#statesDrawer, #hqBanner, #skel and .skblock — all
+     mockup-era leftovers with no markup (or markup nothing ever revealed).
+     Dead weight that made the genuinely decorative controls hard to spot.
+     .cap2 stays (export drawer); `shimmer` stays (preparing progress bar). */
   .cap2{font-size:10.5px;font-weight:800;letter-spacing:.12em;color:var(--faint);margin:16px 2px 4px}
-  #hqBanner{flex:0 0 0;overflow:hidden;background:#0f1a15;border-bottom:1px solid rgba(52,211,153,.35);
-    color:var(--text);font-size:12.5px;max-height:0;transition:max-height .3s ease}
-  #hqBanner.on{max-height:44px;flex-basis:auto}
-  #hqBanner .in{display:flex;align-items:center;gap:8px;padding:10px 14px}
-  #hqBanner b{color:var(--accent)}
-  #hqBanner button{margin-left:auto;background:none;border:1px solid var(--border);color:var(--muted);
-    border-radius:6px;font-size:11.5px;padding:4px 9px}
-  #skel{position:absolute;inset:0;display:none;align-items:center;justify-content:center;z-index:15;
-    background:#08090b}
-  #skel.on{display:flex}
-  #skel .col{display:flex;flex-direction:column;gap:12px;width:min(480px,70%)}
-  .skblock{border-radius:8px;background:#14181c;position:relative;overflow:hidden}
-  .skblock::after{content:"";position:absolute;inset:0;
-    background:linear-gradient(100deg,transparent 30%,rgba(255,255,255,.09) 50%,transparent 70%);
-    animation:shimmer 1.3s infinite}
   .toast.err{border-left-color:var(--danger)}
   /* svg icons */
   .tool .ic{display:flex;justify-content:center;width:22px}
@@ -573,11 +566,11 @@
   <div class="topbar">
     <div class="logo">RM<span>BG</span></div>
     <button class="iconbtn" id="btnBack" title="Back to landing">← <span class="hideM">Back</span></button>
+    <span class="tag" id="editName" style="position:static;background:none;border:0;padding:0"></span>
     <div class="sep"></div>
     <button class="iconbtn" id="btnUndo" title="Undo (Ctrl+Z)">↩ <span class="hideM">Undo</span></button>
     <button class="iconbtn" id="btnRedo" title="Redo (Ctrl+Shift+Z)">↪ <span class="hideM">Redo</span></button>
     <div class="spacer"></div>
-    <button class="btn small ghost hideM" id="btnSaveState">Save state</button>
     <button class="btn small primary" id="btnExport">Export ↓</button>
   </div>
 
@@ -591,6 +584,7 @@
       <button class="tool" data-tool="canvas"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6.13 1L6 16a2 2 0 0 0 2 2h15"/><path d="M1 6.13L16 6a2 2 0 0 1 2 2v15"/></svg></span>Canvas<span class="kbd">5</span></button>
       <div class="cap" style="margin-top:10px">SESSION</div>
       <button class="tool" id="btnNewImage"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></span>New image</button>
+      <button class="tool hidden" id="btnToBatch"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg></span>Batch queue</button>
     </nav>
 
     <div class="stage-wrap">
@@ -611,9 +605,6 @@
               <rect x="219" y="250" width="62" height="7" rx="3.5" fill="#7b838b"/>
               <rect x="219" y="168" width="13" height="146" rx="6.5" fill="#ffffff" opacity=".35"/>
             </svg>
-            <div id="maskView" style="display:none;position:absolute;inset:0;background:#000;align-items:center;justify-content:center">
-              <svg width="70%" height="70%" viewBox="0 0 520 380" preserveAspectRatio="xMidYMid meet"><rect width="520" height="380" fill="#000"/><rect x="231" y="78" width="58" height="44" rx="9" fill="#fff"/><rect x="241" y="116" width="38" height="44" fill="#fff"/><rect x="205" y="150" width="110" height="182" rx="28" fill="#fff"/><rect x="205" y="220" width="110" height="58" fill="#777"/></svg>
-            </div>
             <!-- object-fit:contain, not cover: the canvas layers fill the box
                  exactly, so `cover` cropped the original wherever the box aspect
                  did not match and the two layers no longer lined up. -->
@@ -634,11 +625,6 @@
             <div id="splitDiv" style="left:50%"></div>
           </div>
           <div class="scan" id="scan"><div class="halo"></div><div class="lbl" id="scanLbl">Detecting subject…</div></div>
-          <div id="skel"><div class="col">
-            <div class="skblock" style="height:26px;width:45%"></div>
-            <div class="skblock" style="height:220px"></div>
-            <div class="skblock" style="height:18px;width:70%"></div>
-          </div></div>
         </div>
         <div class="statusbar">
           <button class="iconbtn" id="zoomOut" title="Zoom out">−</button>
@@ -650,9 +636,9 @@
             <button data-view="after" class="on">Cutout</button>
             <button data-view="before">Original</button>
             <button data-view="split">Split</button>
+            <button data-view="overlay">Overlay</button>
             <button data-view="mask">Mask</button>
           </div>
-          <button class="iconbtn hideM" id="btnOverlay" title="Toggle overlay">Overlay</button>
           <div class="spacer"></div>
           <span class="hideM" id="dimLbl" style="font-family:var(--mono)">4032 × 3024</span>
           <button id="localBtn"><span class="dot"></span>Local processing</button>
@@ -844,8 +830,20 @@
   </div>
 </div>
 
+<div id="confirmWrap">
+  <div class="scrim" data-no-confirm></div>
+  <div id="confirmBox" role="alertdialog" aria-modal="true" aria-labelledby="confirmTitle" aria-describedby="confirmBody">
+    <h2 id="confirmTitle">Are you sure?</h2>
+    <p id="confirmBody"></p>
+    <div class="row" style="margin-top:18px">
+      <button class="btn ghost" data-no-confirm>Cancel</button>
+      <button class="btn primary" id="confirmOk">Confirm</button>
+    </div>
+  </div>
+</div>
+
 <div id="reportWrap">
-  <div class="scrim" data-close-report></div>
+  <div class="scrim" data-close-report></div></oldString>
   <div id="reportDrawer">
     <button class="iconbtn x" data-close-report>✕</button>
     <h2>Report an issue</h2>
@@ -975,7 +973,6 @@ function setTool(name){
 $$("[data-tool]").forEach(b=>b.onclick=()=>setTool(b.dataset.tool));
 $("#btnBack").onclick=()=>showView("view-landing");
 $("#btnNewImage").onclick=()=>showView("view-landing");
-$("#btnSaveState").onclick=()=>toast("State saved locally");
 $$("[data-goto]").forEach(b=>b.onclick=()=>showView("view-"+b.dataset.goto));
 
 /* refine sub-modes */
@@ -1000,10 +997,6 @@ $("#btnRecompute").onclick=()=>runScan("Recomputing…");
 $$(".card").forEach(card=>{
   const radios=card.querySelectorAll(":scope > .radio");
   radios.forEach(r=>r.onclick=()=>{radios.forEach(x=>x.classList.toggle("on",x===r));});
-});
-$$("[data-ai]").forEach(r=>r.onclick=()=>{
-  $$("[data-ai]").forEach(x=>x.classList.toggle("on",x===r));
-  toast(r.dataset.ai==="fast"?"Fast preview mode"+MOCK:"High-quality mode"+MOCK);
 });
 $$("[data-bg]").forEach(b=>b.onclick=()=>{
   $$("[data-bg]").forEach(x=>x.classList.toggle("on",x===b));
@@ -1111,18 +1104,11 @@ document.addEventListener("keyup",e=>{if(e.code==="Space")spaceDown=false;});
    the `B` shortcut can toggle both ways. A script-scoped `let` is not a
    property of globalThis and is invisible (and unassignable) from a module. */
 var compareMode="after";
-function setCompare(m){
-  compareMode=m;
-  $$(".seg button").forEach(b=>b.classList.toggle("on",b.dataset.view===m));
-  $("#splitUI").classList.toggle("on",m==="split");
-  const isMask=m==="mask";
-  $("#maskView").style.display=isMask?"flex":"none";
-  $("#demoSubject").style.display=(isMask||$("#uploadedImg").style.display==="block"&&isMask)?"none":($("#uploadedImg").style.display==="block"?"none":"block");
-  if(m==="before")toast("Original pixels — never destroyed");
-  if(m==="mask")toast("Mask: white kept · black removed · gray partial");
-}
+/* No shell setCompare body: src/main.ts installs realCompare as the global
+   setCompare, and this used to be a dead copy that also poked #maskView. The
+   .seg handlers below resolve setCompare at click time, so they now land on
+   the real implementation (including the new Overlay mode). */
 $$(".seg button").forEach(b=>b.onclick=()=>setCompare(b.dataset.view));
-$("#btnOverlay").onclick=e=>{e.currentTarget.classList.toggle("active"); toast("Overlay "+($("#btnOverlay").classList.contains("active")?"on":"off"));};
 /* split drag */
 (()=>{const div=$("#splitDiv"),ui=$("#splitUI");let drag=false;
 div.addEventListener("pointerdown",e=>{drag=true;div.setPointerCapture(e.pointerId);});
@@ -1147,7 +1133,6 @@ function paintDot(e){
   g.addColorStop(0,`rgba(${brushColor()},.5)`);g.addColorStop(1,`rgba(${brushColor()},0)`);
   pctx.fillStyle=g;pctx.beginPath();pctx.arc(x,y,s,0,7);pctx.fill();
 }
-function paintMove(e){/* stroke coalescing is engine-side; mock logs per stroke */}
 function moveRing(e){
   if(!brushMode||spaceDown||window.__rmbgSplitLock){ring.style.display="none";return;}
   const s=+$("#brushSize").value*(e.shiftKey?.5:1);
@@ -1155,7 +1140,6 @@ function moveRing(e){
   ring.style.left=e.clientX+"px";ring.style.top=e.clientY+"px";
 }
 function hideBrushRing(){ring.style.display="none";}
-function paintMoveAlias(){}
 window.addEventListener("resize",()=>{sizePaint();});
 
 /* scan halo */
