@@ -36,6 +36,11 @@
 - A crashed worker is latched via `workerDead`; `callWorker` then rejects
   immediately. Never remove that latch — a terminated worker silently drops
   `postMessage`, so without it every later request hangs forever.
+- Busy overlays are started/stopped by `main.ts` (`startScan`/`stopScan`), never
+  by a `setTimeout`. The duration must equal the work's duration. `#scan` is
+  relocated into `#checker` at runtime so it tracks zoom/pan; the markup ships
+  it as a sibling of `#viewport`, where `inset:0` covered the whole stage.
+  Anything awaiting the worker must sit in a `try/finally { stopScan() }`.
 - The app has ONE editing session (`state`). Anything that replaces it (opening
   a batch item) destroys the mask, the whole `OpLog`, the finishing params and
   the previous preview URL, with no undo. Route it through `confirmAction()`.

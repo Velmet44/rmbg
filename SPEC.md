@@ -76,7 +76,7 @@ Unsupported or undecodable input must produce: format name (when known), why it 
 - Recompute, region recompute, guided select and the brushes all stand down while removal is off — they would edit pixels that are not on screen.
 - Detection mode default is `Auto` (general subject). An optional subject hint (`person`, `product`, `animal`, `auto`) may bias the model where supported; it must never be required.
 - Quality mode: single automatic tier in V1 (fast model). The user must not need to understand the model to use it.
-- Recompute: re-run segmentation. Old result stays visible until the new result is ready.
+- Recompute: re-run segmentation. Old result stays visible until the new result is ready. A progress overlay runs for exactly as long as the work does — never on a fixed timer, which read as "finished" mid-compute — and the previous result survives a failure.
 
 ### 3.3 Inspect
 
@@ -239,6 +239,7 @@ First-run model download is the primary abandonment risk. The following are requ
    (verified: vite-bundling the runtime produced silently broken sessions).
    Self-hosting the runtime file alongside the weights is a Stage-2 step.
 6. **Degradation paths.** No WebGPU → WASM fallback with adjusted time estimate. OOM or memory pressure → explicit message + technical expand + suggested action (smaller image, close tabs, stay on Fast tier). No generic spinner over a frozen image: old result stays visible during recompute; export shows determinate progress.
+7. **Progress is tied to the work, never to a clock.** A busy indicator's lifetime must equal the lifetime of the operation it describes — a fixed timeout reads as "finished" while the mask is still being rebuilt. Show elapsed time instead of a percentage when the true progress is unknowable. While work is in flight, editing stands down: the mask a brush would edit is about to be replaced.
 
 ## 7. Performance and memory requirements
 

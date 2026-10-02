@@ -698,19 +698,20 @@ async function realStart(_withDemo: boolean) {
 async function rerun() {
   if (!state.image) return;
   if (!removalOn()) { W.toast('Turn on “Remove background” first', true); return; }
-  W.runScan('Recomputing…');
-  startElapsed('recomputing');
+  if (isScanning()) { noteEditBlocked('Still working — one moment'); return; }
+  startScan('Recomputing background…');
   try {
     // The old cutout stays on screen until the new one is ready (SPEC 3.2):
     // commitMaskSwap only fires after the worker returns.
     commitMaskSwap('recompute', await segmentCurrent());
     state.removeBg = true;
-    stopElapsed();
     refreshDisplay();
     W.toast('Recomputed');
   } catch (e) {
-    stopElapsed();
+    // Failure keeps the previous cutout — nothing was swapped.
     W.toast(`Recompute failed: ${String(e).slice(0, 120)}`, true);
+  } finally {
+    stopScan();
   }
 }
 
@@ -761,36 +762,80 @@ function runReveal() {
   }, 2000);
 }
 
-let splitNoteAt = 0;
-/** Split and Overlay are inspect-only: earlier paint stays, but no new marks
- *  land. Split shows two finished renders side by side; Overlay deliberately
- *  tints the removed region, so painting on top of it would land against a
- *  background that does not exist. Returns true when the caller must stand
- *  down. */
-function guardSplit(): boolean {
-  const label = lastCompare === 'overlay' ? 'Overlay' : 'Split';
-  if (lastCompare !== 'split' && lastCompare !== 'overlay') return false;
+// ---------- progress overlay ----------
+// Recompute (whole image and region) and on-demand segmentation all keep the
+// previous result on screen and work in the background, so the overlay has to
+// run for exactly as long as the work does. The old implementation showed a
+// halo and hid it on a hardcoded 2600 ms timer: on a slow CPU pass that meant
+// the overlay vanished while inference was still running, which reads as
+// "finished". Nothing here is time-based except the visible clock, which is
+// there to prove liveness.
+let scanTimer: number | null = null;
+let scanBusy = false;
+
+function isScanning(): boolean {
+  return scanBusy;
+}
+
+/** The overlay must track the canvas under zoom/pan, so it has to live INSIDE
+ *  #checker. The markup ships #scan as a sibling of #viewport (inside #stage),
+ *  where `inset:0` covered the whole stage and the beam swept the dark
+ *  background instead of the image. Same reason ensureSplit() relocates
+ *  #splitUI. */
+function ensureScanOverlay() {
+  const el = $('#scan') as HTMLElement | null;
+  const checker = $('#checker') as HTMLElement | null;
+  if (el && checker && el.parentElement !== checker) checker.appendChild(el);
+}
+
+function startScan(label: string) {
+  ensureScanOverlay();
+  const lbl = $('#scanLbl') as HTMLElement | null;
+  if (lbl) lbl.textContent = label;
+  const time = $('#scanTime') as HTMLElement | null;
+  const t0 = performance.now();
+  const tick = () => {
+    if (!time) return;
+    const s = Math.floor((performance.now() - t0) / 1000);
+    time.textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  };
+  tick();
+  scanBusy = true;
+  ($('#scan') as HTMLElement | null)?.classList.add('on');
+  if (scanTimer !== null) clearInterval(scanTimer);
+  scanTimer = window.setInterval(tick, 500);
+}
+
+function stopScan() {
+  if (scanTimer !== null) { clearInterval(scanTimer); scanTimer = null; }
+  scanBusy = false;
+  ($('#scan') as HTMLElement | null)?.classList.remove('on');
+  const time = $('#scanTime') as HTMLElement | null;
+  if (time) time.textContent = '0:00';
+}
+
+/** Shared 2.5 s throttle for "you can't do that right now" toasts. */
+let editNoteAt = 0;
+function noteEditBlocked(msg: string): boolean {
   const now = Date.now();
-  if (now - splitNoteAt > 2500) {
-    splitNoteAt = now;
-    W.toast(`Exit ${label} view to edit`);
-  }
+  if (now - editNoteAt <= 2500) return true;
+  editNoteAt = now;
+  W.toast(msg);
   return true;
 }
 
-/** Guard for anything that mutates the mask or stages new paint. Two reasons to
- *  stand down: no cutout is being applied (the tools would edit pixels nobody
- *  can see), or an inspect-only compare mode is showing. */
+/** Guard for anything that mutates the mask or stages new paint. Three reasons
+ *  to stand down: work is already running (the mask it would edit is about to
+ *  be replaced), no cutout is applied, or an inspect-only compare mode is up. */
 function guardEditing(): boolean {
-  if (!removalOn()) {
-    const now = Date.now();
-    if (now - splitNoteAt > 2500) {
-      splitNoteAt = now;
-      W.toast('Turn on “Remove background” to edit the cutout');
-    }
-    return true;
-  }
+  if (isScanning()) return noteEditBlocked('Still working — one moment');
+  if (!removalOn()) return noteEditBlocked('Turn on “Remove background” to edit the cutout');
   return guardSplit();
+}
+
+function guardSplit(): boolean {
+  if (lastCompare !== 'split' && lastCompare !== 'overlay') return false;
+  return noteEditBlocked(`Exit ${lastCompare === 'overlay' ? 'Overlay' : 'Split'} view to edit`);
 }
 
 function realCompare(m: string) {
@@ -898,10 +943,12 @@ function afterRemovalChange() {
  *  silently showing the original. */
 async function enableRemoval() {
   if (!state.image) return;
+  if (isScanning()) { noteEditBlocked('Still working — one moment'); return; }
   setRemoval(true, { silent: true });
   if (state.mask) { syncRemoveSwitch(); refreshDisplay(); return; }
-  W.runScan('Removing background…');
-  startElapsed('working');
+  // This one can include a cold model load, so the chip's clock is the only
+  // honest signal for a while; it must not disappear on a timer.
+  startScan('Removing background…');
   syncRemoveSwitch();
   try {
     await ensureReady();
@@ -916,7 +963,7 @@ async function enableRemoval() {
     state.removeBg = false;
     W.toast(`Could not remove background: ${String(e).slice(0, 120)}`, true);
   } finally {
-    stopElapsed();
+    stopScan();
     syncRemoveSwitch();
     refreshDisplay();
   }
@@ -1616,7 +1663,7 @@ async function recomputeApply() {
   if (guardEditing()) return;
   if (!recompBox) { W.toast('Drag a box over the problem area first'); return; }
   const box = { ...recompBox };
-  W.runScan('Re-evaluating selection…');
+  startScan('Re-evaluating selection…');
   try {
     const img = state.image;
     const imgCopy = new Uint8ClampedArray(img.rgb);
@@ -1633,7 +1680,10 @@ async function recomputeApply() {
     refreshDisplay();
     W.toast('Region recomputed — rest untouched');
   } catch (e) {
+    // Nothing was swapped, so the previous mask is still intact.
     W.toast(`Recompute failed: ${String(e).slice(0, 140)}`, true);
+  } finally {
+    stopScan();
   }
 }
 
@@ -2177,6 +2227,10 @@ W.loadFile = realLoadFile;
 W.startPreparing = realStart;
 W.setCompare = realCompare;
 W.runExport = realExport;
+// The overlay is owned here, not by the shell: its duration has to equal the
+// work's duration, which only the code awaiting the worker knows.
+W.startScan = startScan;
+W.stopScan = stopScan;
 installStrokeCapture();
 syncStrokeButtons();
 installRefineCapture();

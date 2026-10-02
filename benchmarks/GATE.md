@@ -94,6 +94,21 @@ Follow-up to the same review. 41 engine tests, 27 targeted browser checks and a
 | Fixed a real bug found by the switch: after the first automatic removal the export drawer still read "original photo", because `realStart`/`rerun`/`openBatchItem` set `removeBg` directly and nothing refreshed the drawer. `syncRemoveSwitch()` now owns that refresh. | dims reads `PNG · transparent` immediately after segmentation |
 | The same flow also fixed an export/display inconsistency: `realExport` required `state.mask` even when removal was off, making "export the original" impossible. | file written with removal off |
 
+## Recompute progress overlay (2026-10-02)
+
+15 targeted checks plus a 22-check consolidated regression across all four
+review rounds are green.
+
+| Fix | Evidence |
+|---|---|
+| **The overlay ran for a fixed 2600 ms regardless of the work.** `runScan` in the shell did `setTimeout(() => hide, 2600)`, so on a slow pass (GATE.md: CPU inference is minutes per pass) it vanished mid-compute and read as "finished" while the mask was still being rebuilt. `main.ts` now owns `startScan`/`stopScan`; all three work sites sit in `try/finally`. | held open and still showing at 0.5/2/3.5/5/6.5 s; a real Recompute click tears it down only when the worker settles |
+| New visual: a sensor sweep (glowing vertical beam over faint scanlines, dimmed veil) instead of a pulsing inset rectangle, plus a bottom-centre chip with a pulsing dot, the phase label and a live elapsed clock. | `sweep 2.1s infinite`; chip is `role="status"`; clock read `0:00 → 0:02 → 0:03 → 0:05` |
+| The elapsed clock is the honest signal: true progress is unknowable for a single-shot segmentation, so wall-clock beats a fake percentage (SPEC §6.7). | clock advances and resets to `0:00` on stop |
+| `#scan` was a sibling of `#viewport` inside `#stage`, so `inset:0` covered the whole stage (1016×892) and the beam swept the dark background. It is now relocated into `#checker`, so it tracks the canvas under zoom/pan (same trick as `ensureSplit`). | `parent=checker`, rect `956×478` == checker `956×478` |
+| Editing now stands down while work is in flight (`isScanning()` in `guardEditing`). Previously you could brush mid-recompute: the stroke would be recorded and then the mask replaced underneath it. | paint attempt during a scan leaves log depth unchanged |
+| The shell's duplicate `#btnRecompGo` handler (which started the overlay a second time) is gone; `main.ts` owns that flow. | single owner |
+| `prefers-reduced-motion` stops the sweep and the pulsing dot but keeps the clock, so reduced-motion users retain the "still working" signal. | CSS media query |
+
 ## PENDING (need adequate hardware: real GPU or stronger CPU)
 
 - In-browser cold/warm inference numbers for the quality tier.

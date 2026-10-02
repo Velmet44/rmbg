@@ -183,13 +183,39 @@
     box-shadow:0 0 12px rgba(52,211,153,.8)}
   #splitDiv::after{content:"◂ ▸";position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
     background:var(--accent);color:#06281c;font-size:9px;font-weight:800;border-radius:99px;padding:4px 7px}
-  .scan{position:absolute;inset:0;display:none;align-items:center;justify-content:center;pointer-events:none}
-  .scan.on{display:flex}
-  .scan .halo{position:absolute;inset:6%;border:1.5px solid var(--accent);border-radius:8px;opacity:.8;
-    animation:scanPulse 1.6s ease-in-out infinite}
-  .scan .lbl{background:rgba(0,0,0,.72);border:1px solid rgba(52,211,153,.5);color:var(--accent);
-    font-size:12px;font-weight:700;border-radius:99px;padding:7px 14px;letter-spacing:.02em}
-  @keyframes scanPulse{50%{opacity:.25;inset:9%}}
+  /* recompute / on-demand-segmentation progress.
+     Was a pulsing inset rectangle on a fixed 2.6 s timer, so it vanished
+     mid-compute and read as "finished" while the mask was still being rebuilt.
+     Now a sensor sweep plus a chip carrying a live elapsed clock, driven by
+     src/main.ts start/stop so it lasts exactly as long as the work. */
+  #scan{position:absolute;inset:0;display:none;z-index:9;pointer-events:none;overflow:hidden;
+    border-radius:6px}
+  #scan.on{display:block}
+  #scan .veil{position:absolute;inset:0;background:rgba(8,9,11,.3)}
+  #scan .lines{position:absolute;inset:0;pointer-events:none;
+    background:repeating-linear-gradient(180deg,rgba(52,211,153,.05) 0 1px,transparent 1px 4px)}
+  #scan .beam{position:absolute;top:0;bottom:0;left:0;width:30%;
+    background:linear-gradient(90deg,transparent,rgba(52,211,153,.10) 38%,
+      rgba(52,211,153,.30) 50%,rgba(52,211,153,.10) 62%,transparent);
+    animation:sweep 2.1s cubic-bezier(.45,0,.55,1) infinite}
+  #scan .beam::after{content:"";position:absolute;top:0;bottom:0;left:50%;width:2px;margin-left:-1px;
+    background:var(--accent);box-shadow:0 0 16px rgba(52,211,153,.95),0 0 46px rgba(52,211,153,.45)}
+  /* 294% = beam width (30%) times (100% + its own width), so the trailing edge
+     clears the right border instead of stopping halfway. */
+  @keyframes sweep{from{transform:translateX(-100%)}to{transform:translateX(294%)}}
+  #scan .chip{position:absolute;left:50%;bottom:12px;transform:translateX(-50%);
+    display:flex;align-items:center;gap:10px;padding:7px 14px;border-radius:99px;
+    background:rgba(10,13,16,.92);border:1px solid rgba(52,211,153,.42);
+    box-shadow:0 10px 30px rgba(0,0,0,.55);font-size:12px;font-weight:650;color:var(--text);
+    white-space:nowrap}
+  #scan .chip .pulse{flex:0 0 8px;width:8px;height:8px;border-radius:50%;background:var(--accent);
+    animation:pulseRing 1.3s ease-out infinite}
+  @keyframes pulseRing{
+    0%{box-shadow:0 0 0 0 rgba(52,211,153,.5)}
+    70%{box-shadow:0 0 0 10px rgba(52,211,153,0)}
+    100%{box-shadow:0 0 0 0 rgba(52,211,153,0)}}
+  #scan .chip .t{font-family:var(--mono);font-size:11.5px;color:var(--muted);
+    font-variant-numeric:tabular-nums}
   /* bottom bar */
   .statusbar{flex:0 0 38px;display:flex;align-items:center;gap:8px;padding:0 12px;
     background:var(--bg2);border-top:1px solid var(--border);font-size:12.5px;color:var(--muted);z-index:30}
@@ -393,6 +419,10 @@
     .reveal{opacity:1;transform:none;transition:none}
     .faq-a{transition:none}
     .faq .plus{transition:none}
+    /* The sweep becomes a static tint: the chip still reports the real elapsed
+       time, so a reduced-motion user keeps the honest "still working" signal. */
+    #scan .beam{animation:none;opacity:.3}
+    #scan .chip .pulse{animation:none}
   }
   .minicheck{width:22px;height:22px;border-radius:6px;border:1px solid #3a434d;
     background-image:conic-gradient(#3a434d 0 25%,#232a31 0 50%,#3a434d 0 75%,#232a31 0);
@@ -642,7 +672,16 @@
             </div>
             <div id="splitDiv" style="left:50%"></div>
           </div>
-          <div class="scan" id="scan"><div class="halo"></div><div class="lbl" id="scanLbl">Detecting subject…</div></div>
+          <div class="scan" id="scan">
+            <div class="veil"></div>
+            <div class="lines"></div>
+            <div class="beam"></div>
+            <div class="chip" role="status">
+              <span class="pulse" aria-hidden="true"></span>
+              <span id="scanLbl">Working…</span>
+              <span class="t" id="scanTime">0:00</span>
+            </div>
+          </div>
         </div>
         <div class="statusbar">
           <button class="iconbtn" id="zoomOut" title="Zoom out">−</button>
@@ -1013,7 +1052,9 @@ $$("[data-br]").forEach(b=>b.onclick=()=>{
   toast(subBrush==="guided"?"Guided: click an area"+MOCK:subBrush==="recompute"?"Drag a box, then Recompute"+MOCK:(subBrush==="restore"?"Restore brush ready":"Erase brush ready"));
 });
 $$("[data-g]").forEach(b=>b.onclick=()=>{$$("[data-g]").forEach(x=>x.classList.toggle("on",x===b)); toast("Guided region selected"+MOCK);});
-$("#btnRecompGo").onclick=()=>runScan("Recomputing selection…");
+/* #btnRecompGo has no shell handler: src/main.ts owns that flow and starts/stops
+   the progress overlay itself, so the previous "start it here" onclick only
+   fought the real one. */
 
 /* generic radios + choices */
 $$(".card").forEach(card=>{
@@ -1164,12 +1205,15 @@ function moveRing(e){
 function hideBrushRing(){ring.style.display="none";}
 window.addEventListener("resize",()=>{sizePaint();});
 
-/* scan halo */
-let scanT=null;
+/* Progress overlay. The timer that used to live here (a hardcoded 2600 ms) is
+   gone: it hid the overlay mid-compute, so a slow pass looked finished while the
+   mask was still being rebuilt. src/main.ts owns start/stop and ties the
+   duration to the actual work; this is only a shim for shell-side calls. */
 function runScan(label){
-  $("#scanLbl").textContent=label||"Detecting subject…";
-  $("#scan").classList.add("on");
-  clearTimeout(scanT); scanT=setTimeout(()=>$("#scan").classList.remove("on"),2600);
+  if(window.startScan)window.startScan(label||"Working…");
+}
+function stopScan(){
+  if(window.stopScan)window.stopScan();
 }
 
 /* local popover */
