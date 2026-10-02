@@ -4,8 +4,12 @@
 
 ## Status
 - Docs: `README.md`, `SPEC.md`, `CONTRIBUTING.md`, `CONTRIBUTORS.md`, `LICENSE` (MIT).
-- `packages/engine` — pure-TS cutout engine, DOM-free. Test: `npx vitest run` in `packages/engine` (45 tests).
-- `packages/app` — Vite app (mockup shell + real S1 wiring). Dev: `npx vite` in `packages/app`. Build: `npm run build --workspace @rmbg/app`. Serve built app: untracked `serve.bat` (localhost:8901).
+- `packages/engine` — pure-TS cutout engine, DOM-free. Test: `npx vitest run` in `packages/engine`.
+- `packages/app` — Vite app (mockup shell + real S1 wiring) + a jsdom suite that
+  boots the real `index.html` against a fake Worker/canvas (`packages/app/test/harness.ts`).
+  Test: `npx vitest run` in `packages/app`. Dev: `npx vite`. Build: `npm run build --workspace @rmbg/app`. Serve built app: untracked `serve.bat` (localhost:8901).
+- CI (`.github/workflows/ci.yml`) runs typecheck + both suites + the build on
+  every PR. `deploy.yml` only builds, and only on `packages/{app,engine}/**`.
 - Typecheck is a gate: `npm run typecheck --workspace @rmbg/engine` / `--workspace @rmbg/app`.
   The app `build` runs `tsc --noEmit` first, so a type error fails the deploy.
   `W = window as Record<string, any>` in `main.ts` defeats this for anything

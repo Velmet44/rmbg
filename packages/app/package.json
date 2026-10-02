@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview --port 8901 --strictPort"
@@ -13,7 +14,9 @@
     "@rmbg/engine": "0.1.0"
   },
   "devDependencies": {
+    "jsdom": "^26.1.0",
     "typescript": "^5.6.3",
-    "vite": "^6.3.5"
+    "vite": "^6.3.5",
+    "vitest": "^3.2.7"
   }
 }

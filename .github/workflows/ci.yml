@@ -1,0 +1,53 @@
+name: CI
+
+# No `paths:` filter, deliberately. deploy.yml filters on packages/**, which
+# means a change that touches only packages/engine/test/ or only docs-and-tests
+# triggers no workflow at all — the exact case where CI matters most.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Per-workspace steps rather than the root aggregate scripts
+  # (`npm test` = `npm run test --workspaces --if-present`). The aggregate
+  # version is one line and less to maintain, but it collapses every package
+  # into a single exit code: an engine type error and an app test failure look
+  # identical in the log. Failure isolation is worth the extra steps.
+  typecheck-and-test:
+    name: Typecheck, test, build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+
+      - name: Typecheck engine
+        run: npm run typecheck --workspace @rmbg/engine
+
+      - name: Test engine
+        run: npm run test --workspace @rmbg/engine
+
+      - name: Typecheck app
+        run: npm run typecheck --workspace @rmbg/app
+
+      # Not conditional, and not `continue-on-error`: @rmbg/app is expected to
+      # own a `test` script. If it is ever removed, this step fails and says so
+      # rather than quietly going green with no app tests running.
+      - name: Test app
+        run: npm run test --workspace @rmbg/app
+
+      # The app build runs `tsc --noEmit` before `vite build`, so this also
+      # re-gates the app typecheck against a real build rather than a bare tsc.
+      - name: Build app
+        run: npm run build --workspace @rmbg/app

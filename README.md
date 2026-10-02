@@ -17,9 +17,9 @@ browser (WebGPU with CPU fallback) — your images never leave the machine.
 
 1. Open the link above (desktop or mobile).
 2. Drop an image — the AI model downloads once (~98 MB), then lives in your browser cache.
-3. Inspect (before/after, split view, mask), refine if needed, Export PNG/WebP/JPEG.
+3. Inspect (before/after, split view, mask), refine if needed, export PNG/WebP/JPEG (plus AVIF where your browser can encode it).
 
-Reloads skip the download entirely and work offline.
+Reloads skip the download entirely.
 
 ## What works today
 
@@ -31,22 +31,31 @@ Reloads skip the download entirely and work offline.
 - Finishing: drop shadow, edge feather + defringe
 - One undo timeline across AI, brushes, and settings
 - Sequential batch queue with per-item retry, open-in-editor, and ZIP export
-- Original-resolution export; JPEG transparency guard (never silently flattened)
+- Export at original resolution or a custom size — PNG, WebP, JPEG, plus AVIF where your browser can encode it; JPEG transparency guard (never silently flattened)
 
 ## Roadmap
 
-Custom export resolution, batch queue, guided-selection model upgrade,
-self-hosted weights, Web Worker tuning. See [SPEC.md](SPEC.md) for the plan
-and [benchmarks/GATE.md](benchmarks/GATE.md) for measured gate evidence.
+Self-hosted runtime + weights, multithreaded WASM (needs COOP/COEP headers,
+which the current static host cannot serve), a gated promptable model for guided
+select, a second quality tier, and the Stage 4 hardening items the benchmark
+gate never delivered: the torture set, IoU/F-measure scoring, the 12/24/50 MP
+memory matrix and the per-device-class latency table. See [SPEC.md](SPEC.md) for
+the plan and [benchmarks/GATE.md](benchmarks/GATE.md) for what was and was not
+actually measured.
 
 ## How it works
 
 - Segmentation: BiRefNet-lite 512px ONNX (MIT), via Transformers.js — WebGPU fp16, WASM fallback
+- **The WASM fallback is single-threaded**, because serving the COOP/COEP headers that multithreading needs would block the cross-origin model download. The only CPU figure on record is 6–11 s per 512px pass in Node ([GATE.md](benchmarks/GATE.md)); no browser WASM pass has ever been timed, so treat CPU inference on a weak machine as slow rather than fast.
 - Masks are float alpha (hair and semi-transparency survive); the original pixels are never mutated
-- One swappable `SegmentationAdapter`; the engine is pure TypeScript with 45 unit tests
+- One swappable `SegmentationAdapter`; the engine is pure TypeScript with a DOM-free unit suite
+- Inference runs in a Web Worker, so the page stays interactive during a long CPU pass
 - No backend, no analytics, no tracking — static hosting only ([ARCHITECTURE](SPEC.md#4-engine-architecture))
+- First visit fetches two things from third parties, both code and weights and never your image: the pinned Transformers.js runtime bundle (jsDelivr) and the model weights (Hugging Face). After that, both are cached
 
 Model provenance (revisions, licenses, checksums): [models/manifest.json](models/manifest.json).
+That manifest is kept by hand — nothing in CI validates it, and its SHA-256 was
+computed once, out of band (see [SPEC §5.6](SPEC.md#56-what-is-enforced-and-what-is-only-written-down)).
 
 ## Develop
 
@@ -54,9 +63,20 @@ Requires Node.js 20+.
 
 ```sh
 npm install
-npm test --workspace @rmbg/engine   # 45 unit tests, DOM-free
-cd packages/app && npx vite         # dev server
-./serve.bat                         # build + serve production (localhost:8901)
+npm run typecheck --workspace @rmbg/engine
+npm run test --workspace @rmbg/engine       # DOM-free engine suite
+npm run typecheck --workspace @rmbg/app
+npm run dev --workspace @rmbg/app            # dev server
+npm run build --workspace @rmbg/app && npm run preview --workspace @rmbg/app
+                                           # production build on localhost:8901
+```
+
+`npm test` at the root runs every workspace that has a `test` script; CI
+(`.github/workflows/ci.yml`) runs the same commands one step at a time. The
+benchmark harness needs a fixture you supply yourself — its bytes are
+gitignored, so a fresh clone has none and `measure` exits immediately:
+
+```sh
 npm run measure --workspace @rmbg/harness -- --model=studioludens/birefnet-lite-512 --device=webgpu
 ```
 

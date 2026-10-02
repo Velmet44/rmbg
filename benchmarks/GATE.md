@@ -3,16 +3,48 @@
 Date: 2026-09-29. Machine: CPU-only, 8 GB RAM, ~90 Mbps line but ~6–60 Mbps
 effective to HF CDN (US AWS from India). No usable GPU (SwiftShader only).
 
-## PASS
+> **Read this first (2026-10-02).** This file mixes three different kinds of
+> claim, and they are not equally trustworthy:
+>
+> 1. **Engine unit tests and license audit** — reproducible, still true, cheap to
+>    re-check.
+> 2. **Node ORT CPU smoke test** — a real script (`node-smoke.mjs`) writing real
+>    artefacts to `results/node-smoke-lite512-fp16/`. Reproducible on a CPU box,
+>    slow, and it is not a browser measurement.
+> 3. **In-browser WebGPU numbers** — a **manual Playwright session on a machine
+>    with no usable GPU**, with **no harness artefact**. Not reproducible. See
+>    [Not reproducible](#not-reproducible--ad-hoc-session-no-harness-artefact).
+>
+> **The benchmark harness itself has never produced a single successful
+> measurement.** All three committed `summary.json` files are failure records.
+> Nothing under `results/` can be reproduced from a fresh clone, because
+> `results/` and `fixtures/` are both gitignored. See
+> [The harness has no passing run](#the-harness-has-no-passing-run).
+
+## PASS — verified findings, 2026-09-29
+
+Everything in this section was checked on the date above. Anything from a later
+ad-hoc browser session has been moved out to
+[Not reproducible](#not-reproducible--ad-hoc-session-no-harness-artefact) and is
+not part of this pass.
 
 - **License audit** (`models/LICENSE-AUDIT.md`): BiRefNet + BiRefNet-lite
   (code and browser-export weights) MIT, verified via HF API tags.
   RMBG-1.4 confirmed non-commercial → BYOM-only, never default.
-- **Manifest** (`models/manifest.json`): revisions pinned; lite-512 fp16
-  98,484,532 B / fp32 191,877,254 B; general-512 fp16 473,435,223 B
-  (fp16-only → GPU-only tier).
-- **Engine unit tests**: 16/16 green (mask math, brush, feather/defringe,
-  composite incl. shadow, operation-based history, engine contract w/ fake adapter).
+  *Still true; enforced by review, not by code — see the policy note in that file.*
+- **Manifest** (`models/manifest.json`): revision pinned;
+  lite-512 fp16 98,484,532 B / fp32 191,877,254 B. These match the shipped
+  model (`packages/app/src/model-config.ts`) and are the only artifact the app
+  loads. The manifest is maintained by hand and nothing validates it.
+  *(The `general-512` fp16 473,435,223 B figure that used to sit here is
+  **superseded** — that quality checkpoint was cut on 2026-09-29 and is not in
+  the manifest, not in the app, and not measured. Provenance survives in git
+  history and `models/LICENSE-AUDIT.md`.)*
+- **Engine unit tests**: 16/16 green at the time (mask math, brush,
+  feather/defringe, composite incl. shadow, operation-based history, engine
+  contract w/ fake adapter). *The suite has grown a lot since; that count is
+  what was true on this date, not what it is now — run `npm run test
+  --workspace @rmbg/engine`.*
 - **Real-weights smoke, BiRefNet-lite 512 fp16** (`node-smoke.mjs`, ORT CPU):
   session build ~11 s, inference **6–11 s @512px**, synthetic-circle mask
   exact (fg 0.266 vs truth 0.264, crisp boundary). See
@@ -20,17 +52,82 @@ effective to HF CDN (US AWS from India). No usable GPU (SwiftShader only).
   (Earlier 1024px unpatched builds also segmented exactly at 60 s/pass but
   are rejected for browser use: shader-binding overflow on WebGPU,
   execution failure on WASM.)
-- **In-browser, BiRefNet-lite 512 fp16, real WebGPU** (headless Chromium w/
-  hardware adapter, Transformers v4): init 28.4 s (dl 12.7 s + session
-  12.3 s), inference **20.5 s** on the giraffe torture fixture; mask is
-  professional quality — both giraffes cleanly separated, thin legs and
-  ossicones intact, zebras/tree correctly excluded. See
-  `benchmarks/harness/results/giraffe-mask.png`.
-  (20 s reflects this box's weak GPU + Dawn overhead, not a product ceiling.)
 - **Return visit**: reload + same image re-segments in ~30 s with no
-  re-download (browser cache persists); cutout identical.
+  re-download (browser cache persists); cutout identical. *Manual session, no
+  artefact.*
+
+## The harness has no passing run
+
+Every committed summary is a failure. Quoted verbatim:
+
+| File | `runs` | `fatal` |
+|---|---|---|
+| `results/studioludens_birefnet-lite-512/webgpu/summary.json` | `[]` | `"init result unparseable"` |
+| `results/onnx-community_BiRefNet_lite-ONNX/webgpu/summary.json` | `[]` | `"init TIMEOUT/failed: ETIMEDOUT"` |
+| `results/onnx-community_BiRefNet_lite-ONNX/wasm/summary.json` | `[]` | `"init TIMEOUT/failed: ETIMEDOUT"` |
+
+All three died during `init()`. Not one reached inference, so the harness has
+**no** cold/warm latency, **no** download byte count and **no** quality score for
+any model. The `runs: []` in each file is the authoritative statement; any
+number attributed to "the harness" in this project came from somewhere else.
+
+Sibling evidence that the failures are environmental as much as harness bugs:
+`results/onnx-community_BiRefNet_lite-ONNX/webgpu/init.raw.txt` ends in
+`Target page, context or browser has been closed` — the box was killed
+mid-session.
+
+## A fresh clone reproduces nothing
+
+`.gitignore` excludes `benchmarks/harness/fixtures/*.jpg|*.jpeg|*.png` and
+`benchmarks/harness/results/*`. Only the READMEs in those directories are
+tracked. Consequences:
+
+- A clone has **zero fixtures**. `measure.mjs` reads `fixtures/`, filters for
+  image files, and hard-exits with `No fixtures in benchmarks/harness/fixtures/`
+  if it finds none. You must drop an image in yourself before the harness does
+  anything at all.
+- A clone has **zero measurements**. Nothing in `results/` can be restored from
+  git, and the harness has never succeeded anyway.
+- Only `results/giraffe-mask.png` and the two `node-smoke*` directories survive
+  in this working tree because they predate the ignore rules or were force-added.
+  They are evidence of a past run, not something CI or a new contributor can
+  regenerate.
+
+The torture set this gate was supposed to fix therefore does not exist: one
+fixture (`rmbg14-example.jpg`, supplied by hand), no ground truth, and the
+scoring the SPEC asks for — IoU, boundary F-measure, a rating sheet — was never
+implemented. The harness writes per-phase timings and one mask PNG per run.
+Full accounting in [SPEC §9](../SPEC.md#9-quality-bar-and-benchmark-gate).
+
+## Not reproducible — ad-hoc session, no harness artefact
+
+The following came from a **manual Playwright session**, driven by hand against
+a local page, on the same CPU-only box. They are recorded because they were
+observed; they are **not** benchmark results and no command in this repo
+regenerates them.
+
+- **In-browser, BiRefNet-lite 512 fp16, "real WebGPU"** (headless Chromium w/
+  hardware adapter, Transformers v4): init 28.4 s (dl 12.7 s + session
+  12.3 s), inference **20.5 s** on the giraffe fixture. On a box documented
+  above as having **no usable GPU (SwiftShader only)** — so the "hardware
+  adapter" claim and the machine description contradict each other, and this
+  line should not be read as a WebGPU measurement at all.
+- **Visual evidence:** `benchmarks/harness/results/giraffe-mask.png` — both
+  giraffes cleanly separated, thin legs and ossicones intact, zebras and tree
+  correctly excluded. **Captured manually, outside the harness.** It is a real
+  result from a real run; it is one image on one box, not a score.
+- The 20 s figure reflects that machine's software GPU plus Dawn overhead. It is
+  not a product ceiling and not a floor.
+
+Read the two together: the harness's own attempt to measure in-browser
+inference is the `"init result unparseable"` record above. Manual number good,
+automated number failed — and the automated one is the one that would have
+counted as a gate.
 
 ## Stage 3 evidence (2026-09-30, giraffe fixture, in-app)
+
+Manual verification in a real browser against the built app, one fixture, no
+automated assertion. Evidence is per-item and was read off the running page.
 
 - Background color + subject transform (70% scale screenshot), shadow +
   feather sliders (screenshot), guided click-to-region (history depth grew,
@@ -40,7 +137,8 @@ effective to HF CDN (US AWS from India). No usable GPU (SwiftShader only).
 
 `measure.mjs` step-wise with per-phase timeouts, timestamped logging,
 download/session-build split timing, software-WebGPU auto-skip,
-WebGPU→WASM fallback, `--inferSize` bisection support.
+WebGPU→WASM fallback, `--inferSize` bisection support. *(Tooling capability,
+not a passing measurement — see above.)*
 
 ## App-layer defect fixes (2026-10-02, no model change)
 
@@ -132,21 +230,44 @@ review rounds are green.
 | Overlay veil raised `rgba(8,9,11,.2)` → `rgba(7,8,10,.46)` so the canvas clearly sits *under* the overlay instead of looking like a bright photo with a line across it. Scanlines dimmed `.03` → `.025`. | computed `rgba(7, 8, 10, 0.46)` |
 | Reveal delay cut from a 2 s hold + 1.6 s wipe to a 0.5 s hold + 1.1 s wipe. The 2 s hold read as a second wait after the overlay had already cleared. | measured gap from overlay-clear to first wipe frame: **542 ms** |
 
-## PENDING (need adequate hardware: real GPU or stronger CPU)
+## PENDING — none of this has been measured
 
-- In-browser cold/warm inference numbers for the quality tier.
-- Torture-set expansion (1 real fixture + synthetic now; hair/fur/glasses
-  cases still to add) and human ratings of real-fixture masks.
+Blocked on hardware the project does not have: a real GPU, or a much stronger
+CPU than the 8 GB SwiftShader box above. Listed as pending so it is not mistaken
+for a claim.
+
+- In-browser cold/warm inference numbers, on any device, from the harness. The
+  only in-browser figures on record are the manual WebGPU session under
+  [Not reproducible](#not-reproducible--ad-hoc-session-no-harness-artefact).
+- Peak memory at 12 / 24 / 50 MP. `harness/page.html` records no memory reading
+  at all, so the matrix SPEC §7 asks for has no data behind it.
+- Torture-set expansion (currently **1** real fixture; hair/fur/glasses cases
+  still to add), ground-truth masks, IoU / boundary F-measure scoring, and human
+  ratings of real-fixture masks.
+- A per-device-class latency table. There is no GPU data in this repo to build
+  one from — the only machine that ever ran the harness had none.
 - Full apple-to-apple quality comparison vs server tools.
+- A full network-off run of the shipped flow (return-visit-no-download is
+  verified; full offline is not).
 
 ## Decided from measurement (not pending)
+
+These conclusions came out of real runs and stand:
 
 - Quality tier (BiRefNet-512 fp16) is GPU-only: node ORT dies with
   `bad allocation` in the deformable-attention block even at 512px on an
   8 GB CPU box. CPU users stay on the fast tier by design; the app's
-  upgrade path targets WebGPU only.
+  upgrade path targets WebGPU only. *(Checkpoint cut 2026-09-29; not shipped.)*
+- 1024px BiRefNet exports are rejected for browser use: shader-binding overflow
+  on WebGPU, execution failure on WASM. 512 is the working ceiling.
 - Fast-tier download is ~98 MB (fp16/WebGPU) / ~183 MB (fp32/WASM CPU).
   First-run honesty (determinate MB progress) is mandatory; a truly tiny
-  fast model + self-hosted weights are Stage-2 work.
-- CPU inference is minutes-per-pass class on weak hardware: inference must
-  move to a Web Worker (Stage 2) so the page never looks dead while working.
+  fast model + self-hosted weights are open items.
+- CPU inference is minutes-per-pass class on weak hardware. ~~inference must
+  move to a Web Worker (Stage 2)~~ — **done, and no longer a concern**: inference
+  has run in a Web Worker since Stage 2, so the page stays interactive during a
+  slow pass. What is still true is the reason the number is bad: the browser WASM
+  fallback is **single-threaded**, because the COOP/COEP headers that
+  multithreading needs would block the cross-origin model download (see the note
+  in `packages/app/vite.config.ts`). Self-hosting the weights so those headers
+  can be served is what would unblock it.

@@ -1,8 +1,11 @@
 # RMBG — Product & Engineering Specification
 
-Version: 1.0 (pre-development)
+Version: 1.0
 License: MIT (code). Model weights carry their own licenses — see §5.
-Status: Definition. No code exists yet.
+Status: Implemented. V1 is live at https://velmet44.github.io/rmbg; this
+revision is 2026-10-02. Parts of this document are still targets rather than
+shipped behaviour — anything labelled **NOT DONE** has not been built or
+measured. §13 carries the per-stage status.
 
 ## 0. Summary
 
@@ -74,7 +77,7 @@ Unsupported or undecodable input must produce: format name (when known), why it 
 - Toggling it **off shows the original photo and does not discard the mask**, so turning it back on restores the same cutout instantly with no second inference. Turning it on for an image that has never been segmented runs segmentation and reports progress.
 - Recompute is available only while removal is on and a mask exists. The old cutout stays visible until a replacement is ready; a failure keeps the old result and reports why.
 - Recompute, region recompute, guided select and the brushes all stand down while removal is off — they would edit pixels that are not on screen.
-- Detection mode default is `Auto` (general subject). An optional subject hint (`person`, `product`, `animal`, `auto`) may bias the model where supported; it must never be required.
+- Detection mode: general subject. V1 ships no subject-hint control — the gated checkpoint has one behaviour, so a `person` / `product` / `animal` selector would have been a choice between options the model cannot honour. Reintroduce it with the first model that genuinely varies by subject (§4.2).
 - Quality mode: single automatic tier in V1 (fast model). The user must not need to understand the model to use it.
 - Recompute: re-run segmentation. Old result stays visible until the new result is ready. A progress overlay runs for exactly as long as the work does — never on a fixed timer, which read as "finished" mid-compute — and the previous result survives a failure.
 
@@ -168,38 +171,60 @@ Export:    derived artifact; never stored as source of truth
 
 Alpha is float, not binary. This preserves hair and semi-transparency and makes feather/defringe well-defined.
 
-### 4.2 Engine API contract (illustrative, binding for V1)
+### 4.2 Engine API contract (as shipped, 2026-10-02)
+
+The adapter is the only seam to a model backend:
 
 ```ts
 type ImageRef = { id: string; width: number; height: number; rgb: Uint8ClampedArray };
 type AlphaMask = { width: number; height: number; alpha: Float32Array };
-type SubjectHint = "auto" | "person" | "product" | "animal";
-type QualityTier = "fast" | "quality";
 
 interface SegmentationAdapter {
   readonly modelId: string;
   init(progress?: (p: ModelProgress) => void): Promise<void>;
-  segment(image: ImageRef, opts: { hint: SubjectHint; tier: QualityTier }): Promise<AlphaMask>;
-  recomputeRegion(image: ImageRef, mask: AlphaMask, bbox: BBox, opts: { hint: SubjectHint }): Promise<AlphaMask>;
-  dispose(): Promise<void>;
-}
-
-interface Engine {
-  removeBackground(image: ImageRef, opts: { hint?: SubjectHint; tier?: QualityTier }): Promise<AlphaMask>;
-  applyBrush(mask: AlphaMask, stroke: BrushStroke, mode: "erase" | "restore"): AlphaMask;
-  guidedSelect(image: ImageRef, mask: AlphaMask, point: Point, mode: "erase" | "restore"): Promise<AlphaMask>;
+  segment(image: ImageRef): Promise<AlphaMask>;
   recomputeRegion(image: ImageRef, mask: AlphaMask, bbox: BBox): Promise<AlphaMask>;
-  feather(mask: AlphaMask, radius: number): AlphaMask;
-  defringe(image: ImageRef, mask: AlphaMask, amount: number): AlphaMask;
-  composite(image: ImageRef, mask: AlphaMask, background: Background, effects: Effects): ImageData;
-  export(image: ImageRef, mask: AlphaMask, opts: ExportOptions): Promise<ExportResult>;
+  dispose(): Promise<void>;
 }
 ```
 
-- `segment` runs at working resolution (default longest side 512 — the largest
-  size the gated browser-compatible exports accept), returns working-res alpha;
-  engine upsamples to full-res via joint/guided upsampling against the original RGB.
-- `recomputeRegion` patches only the bbox area (with context padding + edge blending); outside the region the mask is bit-identical.
+Everything else is consumed as free functions, with `OpLog` owning history:
+
+```ts
+// working-res inference + full-res upsample
+removeBackground(adapter, image): Promise<AlphaMask>
+
+// in-place mask mutation; recorded through OpLog when it must be undoable
+OpLog#applyBrush(mask, stroke, "erase" | "restore")
+applyBrushStroke(mask, stroke, mode): void        // unlogged, pure
+refineEdges(mask, { feather, defringe }): void   // in place
+
+// guided select (§4.4)
+growRegion(image, px, py, opts): GrownRegion
+
+// presentation only (§4.3)
+composite(image, mask, background, effects): CompositeResult
+compositeOverlay(image, mask, options)           // inspect-only, never exported
+transformSubject(image, transform): Transformed
+```
+
+`OpLog` also owns `replaceMask`, `commitRegion` and `undo`/`redo`: an operation
+that changes alpha is only undoable if the log captured the pre-image, and the
+log is the single place that knows how.
+
+Reconciliation against the 1.0 draft of this section:
+
+- **`createEngine()` and the `Engine` facade are deleted.** The facade wrapped four operations the app called as free functions anyway, so it cost an object graph and added a second logging surface with no behaviour of its own.
+- **`applyBrush` returned an `AlphaMask`; it returns `void`.** The operation mutates the mask buffer in place. A returned "mask" was the same array, so the return value promised an isolation that did not exist. Undo comes from `OpLog`, not from a copy.
+- **`feather` and `defringe` are one in-place call**, `refineEdges(mask, fx)`, not two functions returning new masks.
+- **`guidedSelect` shipped as `growRegion`** — the deterministic fallback of §4.4, not a promptable model. No promptable model passed a gate, so none is claimed.
+- **`export` was never an engine function.** Encoding and the file write need a canvas and a browser; the engine stays DOM-free (§4 preamble). Export is app-layer and works off `composite`.
+- **`tier` and `hint` are removed** from `segment`, `recomputeRegion` and `removeBackground`. V1 ships exactly one model at exactly one working resolution, so both parameters were accepted and then dropped on the floor by the adapter (`async segment(image, _opts)`). A control that promises to bias the model and does not is worse than no control. They come back with the second gated model; constraint §5.5 already requires this interface to stay stable across that swap.
+
+Behavioural notes:
+
+- `segment` runs at working resolution (longest side ≤ `WORKING_LONG_SIDE` = 512 — the largest size the gated browser-compatible exports accept) and returns working-res alpha; `removeBackground` upsamples to full-res against the original RGB.
+- `recomputeRegion` patches only the bbox area (with context padding + a 6 px edge blend); outside the region the mask is bit-identical.
 - Brush ops are synchronous, pure, and undoable as single ops.
 
 ### 4.3 Compositor
@@ -210,7 +235,7 @@ Background replacement, shadow, feather, and defringe affect only the composite/
 
 ### 4.4 Guided select
 
-V1 requirement: click-to-region with explicit erase/restore intent. Implementation is either a lightweight promptable segmentation model or a deterministic fallback (e.g. flood/superpixel region grow constrained by the click). The spec does not mandate which; it mandates the behavior: one click selects a coherent region boundary the user can then erase or restore in one step. If no promptable model passes the quality gate (Stage 0), ship the deterministic fallback and note it as such.
+V1 requirement: click-to-region with explicit erase/restore intent. **Shipped as the deterministic fallback** — `growRegion` flood-grows on image colour from the click point (threshold 28, capped at half the frame) and returns the region's box plus a filled working-size patch that the caller applies as erase or restore. No promptable segmentation model passed the Stage 0 gate, so none is claimed and no quality number exists for it. Its known weakness is that a click on a gradient or a busy background grows a region that does not match what the user saw; that is a documented limitation, not a bug to be fixed silently. Raising the quality bar here means gating a promptable model as an independent feature (§9), not retuning the flood fill.
 
 ### 4.5 Object eraser (conditional)
 
@@ -220,11 +245,21 @@ Object eraser requires an inpainting model (background reconstruction), which is
 
 Binding constraints:
 
-1. **Default model must be MIT-compatible** (code and weights). Current designated default: BiRefNet-general (MIT) with a BiRefNet-lite fast tier. Exact checkpoint, source URL, commit/revision, and SHA-256 are recorded in `models/manifest.json` and verified at fetch time.
+1. **Default model must be MIT-compatible** (code and weights). Shipped default: **BiRefNet-lite 512** (`studioludens/birefnet-lite-512`, MIT, rev `4a3c40c3`) — the only shipped model, at one working resolution (512). Exact checkpoint, source URL and pinned commit/revision are recorded in `models/manifest.json`; its SHA-256 was computed once, by hand, on 2026-09-29. **No automated step verifies the checksum at fetch time** (§5.6) — a revision bump that keeps the same id would be loaded silently.
 2. **RMBG-1.4 / RMBG-2.0 weights are non-commercial source-available** and must not be distributed as the default or claimed as MIT. They are supported only as user-supplied BYOM (bring-your-own-model): the user provides a URL or local file and explicitly accepts the upstream license. The app must surface the license notice at BYOM load time.
 3. **Never commit weights to git.** `models/` contains manifests only: model id, display name, source, revision, license, license URL, attribution, checksum, expected input size, tier (`fast` | `quality`).
 4. Every bundled or referenced model documents: name, source, version/commit, license, attribution, modifications (e.g. quantization, opset conversion), checksum.
 5. The segmentation adapter interface (§4.2) is stable across model swaps. Changing models must not require product-flow changes.
+
+#### 5.6 What is enforced, and what is only written down
+
+`models/manifest.schema.json` exists and `models/manifest.json` points at it via `$schema`, but **nothing validates that pointer**: no validator, no npm script, no test, no CI step. The schema's `required` list is only `["modelId","tier","role","source","revision","license"]`, so `rmbg-1.4` — which ships `"checksum": null` and `"files": []` — satisfies it today. Three consequences a reader must not assume away:
+
+- The manifest is a **record kept by hand**, not a gate. Typos in it are not caught.
+- The MIT-only default rule and the license-refusal rule in `models/LICENSE-AUDIT.md` are **policy enforced by review, by a human**.
+- The harness takes `--model=<hf-id>` free-form and does not read the manifest, so it can and will measure a non-MIT artifact. Its recorded attempts to do so are failures, not results (`benchmarks/GATE.md`).
+
+Turning §5 into an actual gate — a `validate:manifest` script wired into CI that checks the schema, the MIT rule and the checksum — is a Stage 4 item, not current behaviour.
 
 ## 6. Instant-first loading strategy
 
@@ -236,24 +271,25 @@ First-run model download is the primary abandonment risk. The following are requ
    - **The long phase belongs on the canvas.** Once the model is ready, the flow hands off from the loading card to the editor and shows the progress overlay over the user's own photo. A loading bar for work whose result the user can already see is a worse feedback signal than the image itself.
 3. **Download vs upload messaging.** Any progress indicator distinguishes `Local AI model download (MB / total, cached after first visit)` from image handling. The image is never described as uploading to a server.
 4. **Working resolution first.** Inference runs at working resolution; full-resolution output is produced by upsampling the mask against original RGB (see §7). This bounds latency and memory while honoring original-resolution export.
-5. **Persistent cache.** Runtime and weights persist via Service Worker + Cache API / IndexedDB (whichever the adapter uses — exactly one owner, no dual caches). Return visits skip download entirely except for versioned manifest updates, which are diffed by checksum.
+5. **Persistent cache.** Runtime and weights persist via the Cache API under one bucket name (`RUNTIME_CACHE_NAME`) — exactly one owner, no dual caches. Return visits skip the download entirely — **except** that "diffed by checksum" is **NOT DONE**: nothing compares a checksum at runtime, so version skew between a cached artifact and the manifest goes unnoticed (§11).
    The inference runtime itself loads from a pinned CDN ESM build at runtime
    (verified: vite-bundling the runtime produced silently broken sessions).
-   Self-hosting the runtime file alongside the weights is a Stage-2 step.
+   Self-hosting that runtime file alongside the weights is still open — it is on
+   the README roadmap, not a Stage-2 leftover.
 6. **Degradation paths.** No WebGPU → WASM fallback with adjusted time estimate. OOM or memory pressure → explicit message + technical expand + suggested action (smaller image, close tabs, stay on Fast tier). No generic spinner over a frozen image: old result stays visible during recompute; export shows determinate progress.
 7. **Progress is tied to the work, never to a clock.** A busy indicator's lifetime must equal the lifetime of the operation it describes — a fixed timeout reads as "finished" while the mask is still being rebuilt. Show elapsed time instead of a percentage when the true progress is unknowable. While work is in flight, editing stands down: the mask a brush would edit is about to be replaced.
 
 ## 7. Performance and memory requirements
 
-- Targets after caching (ordinary photos, working-res inference): high-end GPU on the order of 1–3 s; mid-range GPU several seconds; CPU/WASM fallback substantially slower. These are targets for the benchmark harness, not user-facing guarantees.
+- Targets after caching (ordinary photos, working-res inference): high-end GPU on the order of 1–3 s; mid-range GPU several seconds; CPU/WASM fallback substantially slower. These are **targets, not measurements** — no harness run has produced a comparable figure (see §9 and `benchmarks/GATE.md`), and the one in-browser WebGPU number on record came from an ad-hoc session that cannot be reproduced.
 - Session reuse: one inference session per tier, reused across images and batch items. Session init cost is paid once and measured separately from per-image latency.
-- Large images: never attempt naive full-resolution neural inference. Required path is working-res inference + full-res mask upsampling, or tiled inference with overlap and edge blending where working-res loses too much detail. Peak memory is bounded and tested at 12 MP, 24 MP, and 50 MP inputs.
+- Large images: never attempt naive full-resolution neural inference. Required path is working-res inference + full-res mask upsampling, or tiled inference with overlap and edge blending where working-res loses too much detail. **NOT DONE:** peak memory is not yet measured. `benchmarks/harness/page.html` records no memory reading at all, so the 12 MP / 24 MP / 50 MP matrix below has no data behind it.
 - Batch is sequential. Parallel model executions are forbidden in V1 (memory blowup).
 - Batch admission is bounded by total pixels, not file count: a queued item holds
   full-res RGB plus a Float32 mask (~7 B/px), and the ZIP export additionally
   buffers every PNG. Over-budget drops are refused with the running total shown,
   never silently truncated.
-- Benchmark harness records per-model, per-tier, per-device-class: download bytes, cold/warm latency, peak memory, and mask quality scores on the torture set.
+- **NOT DONE:** the per-model, per-tier, per-device-class table (download bytes, cold/warm latency, peak memory, mask quality on the torture set) has not been produced. All three committed harness summaries are failure records with `"runs": []`. There is also no device-class data to tabulate: the gate machine was CPU-only with no usable GPU, so nothing in this repo describes a real high-end or mid-range GPU.
 
 ## 8. Format policy
 
@@ -271,13 +307,19 @@ Gate rule: **no editor work beyond Stage 1 until the Stage 0 benchmark passes.**
 - Default fast and quality tiers each have minimum bar + latency ceiling per device class. Guided select and inpaint-erase have independent gates; failure defers them without blocking the core remove → export path.
 - Results are recorded per model revision so regressions are visible.
 
+**What this gate actually delivered (honest accounting).** The rig exists (`benchmarks/harness/`), but the gate did not pass in the sense this section intends, and the record says so. Editor work shipped past Stage 1 anyway.
+
+- The harness writes per-phase timings and one mask PNG per run. It computes **no IoU, no boundary F-measure, and no rating sheet** — there is no ground truth in the repo and no scoring code. Every quality claim in this project currently rests on a human looking at a mask.
+- The torture set is **one fixture** (`rmbg14-example.jpg`), not the nine cases listed above. No hair, no fur, no glasses, no white-on-white, no small object.
+- Fixture and result bytes are gitignored, so a fresh clone reproduces nothing; a contributor must supply an image by hand or `npm run measure` exits immediately.
+- All three committed harness summaries are failures (`"runs": []` plus a `fatal` reason), and `results/` cannot be repopulated from git.
+- Consequence: **the target in this section is unverified.** It is a design goal for the product, not a measured property of the shipped build.
+
 ## 10. Privacy and security requirements
 
 - Default flow: no account, no image upload, no server-side processing, no analytics, no tracking, no advertising.
-- No third-party network request on page load. The only outbound calls are the
-  model runtime and weights (see §6); the app makes none of its own, and
-  decorative counters that needed an API were removed rather than kept.
-- After model + app assets are cached, the full single-image flow must pass with network disabled (subject to browser limits). This is a release test, not an aspiration.
+- **First visit makes two third-party requests, both code and weights, never image bytes**: the pinned CDN ESM runtime bundle (jsDelivr, §6.5) and the model weights (Hugging Face). Any statement implying the model file is the only download is false and must not appear in the UI or the docs. After the first visit both are served from cache and the app makes no outbound request at all; the app itself adds none, and decorative counters that needed an API were removed rather than kept. Image pixels are never part of any of these requests, which is the promise the product actually makes.
+- After model + runtime assets are cached, the full single-image flow must pass with network disabled (subject to browser limits). **NOT DONE:** a full network-off run of the shipped flow has not been performed; only a return-visit-no-download check exists (`benchmarks/GATE.md`).
 - Clipboard, file, and camera inputs are handled in-memory/locally. No image bytes in URLs, logs, or error reports.
 - Optional quality-feedback prompt (`Fine` / `Needs fixing` + reason) is local-only unless the user explicitly opts into sending a diagnostic payload. Any opt-in payload excludes original pixels by default.
 - BYOM URLs are fetched directly by the client; upstream license text is shown before download.
@@ -290,81 +332,89 @@ Every fallible step has an explicit, actionable message:
 - Inference failure / OOM: device-memory explanation + action (downscale, close tabs, Fast tier), with collapsible technical details (model id, backend, working resolution). Never raw `ONNX Runtime exception` as the only text.
 - Decode failure: format + reason + suggestion.
 - Export failure: what was being written (format, dimensions) + recovery (retry, different format, smaller custom resolution).
-- Version skew (cached model vs manifest): detect by checksum, re-fetch only the changed artifact, state what updated.
+- Version skew (cached model vs manifest): detect by checksum, re-fetch only the changed artifact, state what updated. **NOT DONE:** nothing in the repo computes or compares a checksum at runtime, so a same-id/different-revision change is invisible to the app.
 
-## 12. Repository structure (target)
+## 12. Repository structure (as shipped)
 
 ```text
 rmbg/
   SPEC.md
   README.md / LICENSE / CONTRIBUTING.md / CONTRIBUTORS.md / AGENTS.md
+  .github/workflows/       # ci.yml (typecheck + tests + build), deploy.yml (Pages)
+  docs/images/             # README before/after sample images
   models/
-    manifest.json        # tier, source, revision, license, checksum per artifact
+    manifest.json          # tier, source, revision, license, checksum per artifact
+    manifest.schema.json   # declared only — nothing validates against it (§5.6)
+    LICENSE-AUDIT.md       # license conclusions and the MIT-only default rule
   packages/
-    engine/              # pure TS engine + adapters + tests (no DOM)
-    app/                 # thin web client over the engine
+    engine/                # pure TS engine + adapters + vitest suite (no DOM)
+    app/                   # thin web client over the engine
   benchmarks/
-    torture/             # fixture manifests (images external, not in git raw)
-    harness/             # scoring + latency + memory scripts
+    GATE.md                # Stage 0 exit record
+    harness/               # measure.mjs, node-smoke.mjs, page.html
+      fixtures/            # images here are gitignored; README tracked
+      results/             # measurements gitignored; README tracked
 ```
+
+There is no `benchmarks/torture/` directory: fixtures live in `benchmarks/harness/fixtures/` and are supplied by hand, because their bytes are gitignored.
 
 Weights, fixtures, and exports never enter git. Bundle contains code + manifests only.
 
 ## 13. Build order (stages)
 
-> Status 2026-09-29: **Stage 0 DONE** (gate record: `benchmarks/GATE.md`),
-> **Stage 1 DONE** (engine + app verified end-to-end on the giraffe fixture:
-> upload → fast remove → inspect → PNG export at original resolution, fully
-> local). Stages 2–4 not started.
->
-> Status 2026-09-30: **Stage 3 DONE** (correction tools; evidence in
-> `benchmarks/GATE.md`). Batch queue, custom export resolution and
-> capability-gated AVIF have since landed, so those rows below are
-> out of date — Stage 4 is partially in. See `AGENTS.md` for the
-> current commands.
+Per-stage status as of 2026-10-02. `DONE` means built and, where a claim needed evidence, the evidence is named. `PARTIAL` means the code exists but the exit criteria did not all run. `NOT DONE` means not started.
 
-### Stage 0 — Model gate and harness ✅ DONE
+| Stage | Status | Evidence / gap |
+|---|---|---|
+| 0 — Model gate and harness | **PARTIAL** | Manifest, license audit and the `benchmarks/harness` rig exist. The harness has never produced a passing measurement: all three committed summaries are failure records with `"runs": []`, and the latency numbers in `GATE.md` come from an ad-hoc browser session. No torture set, no IoU/F-measure, no peak memory, no device classes (§7, §9). |
+| 1 — Engine core | **DONE** | `ImageRef`, float-alpha mask store, `OpLog`, `SegmentationAdapter`, `removeBackground` + full-res upsample, `composite`, app-layer export at original resolution. Engine suite and typecheck run in CI. Verified end-to-end on the giraffe fixture (drop → remove → inspect → PNG at original resolution). |
+| 2 — Loading strategy | **DONE** (absorbed into 0–1) | Web Worker inference, page-load prefetch, phased honest progress, cache persistence, return visit skips the download, mobile shell. Multithreaded WASM remains Stage 4. |
+| 3 — Correction | **DONE 2026-09-30** | Brushes, mask/overlay views, guided select (deterministic fallback), region recompute, shadow/feather/defringe, background + subject transform, single operation-based history. Evidence tables in `benchmarks/GATE.md`. |
+| 4 — Batch and hardening | **PARTIAL** | Batch queue, per-item retry, guarded open-in-editor and ZIP export shipped; capability-gated AVIF and custom export resolution shipped. **Not done:** error-injection tests, the 12/24/50 MP memory matrix, the device-class latency table, multithreaded WASM, a manifest validator, a real privacy audit and a full network-off run. |
 
-- Finalize `models/manifest.json` (default fast + quality MIT checkpoints, licenses, checksums).
-- Stand up `benchmarks/harness` + fixed torture set references.
-- Run all candidate default models in-browser (WebGPU + WASM) and record download size, cold/warm latency, peak memory, quality scores.
-- Exit criteria: one fast tier and one quality tier pass their bars; OOM boundaries documented; license audit signed off (default MIT, BYOM path defined).
+An earlier draft of this section carried a second, mislabelled "Stage 3" heading and a status note claiming Stage 4 was untouched. Both are gone; the table above is the only stage record in this document.
+
+### Stage 0 — Model gate and harness ⬜ PARTIAL
+
+- Finalize `models/manifest.json` (default fast + quality MIT checkpoints, licenses, checksums). — manifest is complete for the shipped model; there is no quality checkpoint (cut 2026-09-29) and nothing validates the manifest (§5.6).
+- Stand up `benchmarks/harness` + fixed torture set references. — rig done; **the torture set is one fixture**, referenced from a README whose image bytes are gitignored.
+- Run all candidate default models in-browser (WebGPU + WASM) and record download size, cold/warm latency, peak memory, quality scores. — **not done.** Every harness run failed at init. Download size is known from the manifest; cold/warm latency exists only for one ad-hoc WebGPU session; peak memory was never recorded.
+- Exit criteria: one fast tier and one quality tier pass their bars; OOM boundaries documented; license audit signed off (default MIT, BYOM path defined). — license audit signed off; **one tier passed no bar**, because no bar was ever measured.
 
 ### Stage 1 — Engine core ✅ DONE
 
 - Implement `ImageRef`, float-alpha `Mask store`, op log, `SegmentationAdapter` for the gated checkpoints.
-- Implement `removeBackground`, working-res inference + full-res upsampling, `composite`, PNG/WebP/JPEG `export` at original resolution.
+- Implement `removeBackground`, working-res inference + full-res upsampling, `composite`, and export at original resolution. (Export is app-layer, not engine — see §4.2.)
 - Unit tests on synthetic masks (brush math, feather, composite, history) + adapter contract tests with fixture tensors.
-- Exit criteria: scripted remove → export passes headless with network disabled after cache; no DOM dependency in engine.
+- Exit criteria: scripted remove → export passes headless with network disabled after cache; no DOM dependency in engine. — the DOM-free engine suite and typecheck run in CI; **the network-disabled end-to-end run has not been performed** (§10).
 
-### Stage 2 — SUPERSEDED (worker, prefetch, phased progress, cache proof, mobile shell all landed during Stages 0–1)
+### Stage 2 — Loading strategy ✅ DONE (superseded as a separate stage)
 
-### Stage 3 — Correction (DONE 2026-09-30; see benchmarks/GATE.md for evidence) — Instant shell ⬜ NEXT
+Worker, prefetch, phased progress, cache proof and the mobile shell all landed during Stages 0–1, so there is nothing left under this heading. The remaining item is multithreaded WASM, tracked under Stage 4.
 
-- Landing ingest (picker, drop, paste, mobile picker), page-load model prefetch, Cache API/IndexedDB persistence.
-- Fast-first flow: result as soon as the (single-tier) model is ready, honest phased progress (cache check → download → session build → inference), session reuse.
-- Before/after, split, mask/overlay inspection, 100% zoom + pan, export settings (format, resolution, background choice incl. JPEG guard).
-- Exit criteria: first-visit drop-to-preview feels instant after fast tier; return visit skips download; offline-after-cache test passes.
-
-### Stage 3 — Correction
+### Stage 3 — Correction ✅ DONE (2026-09-30)
 
 - Manual erase/restore brushes (size, softness), mask/overlay views, operation-based undo/redo across AI + manual + background + effects ops.
 - Region recompute (bbox + context + edge blend, rest of mask preserved).
-- Guided select (promptable model if gated, else documented deterministic fallback).
+- Guided select — shipped as the deterministic fallback, not a promptable model (§4.4).
 - Shadow, feather, defringe; background color/image + subject transform (visible only when relevant).
-- Exit criteria: scripted correction suite passes (erase/restore round-trip, recompute preserves outside region, undo depth covers all op classes).
+- Exit criteria: scripted correction suite passes. — verified in-app against the production build, itemised in `benchmarks/GATE.md`.
 
-### Stage 4 — Batch and hardening
+### Stage 4 — Batch and hardening ⬜ PARTIAL
 
-- Sequential batch queue, per-item states, retry, open-in-editor, batch export + archive.
-- Full error catalog (§11) wired to real failure injection tests.
-- Memory/large-image matrix (12/24/50 MP), device-class latency table published from harness.
-- Privacy audit: no image bytes leave the device in default flow; optional feedback is opt-in and pixel-free by default.
-- Exit criteria: release checklist green — benchmark gate, offline test, privacy audit, license manifest complete.
+- ✅ Sequential batch queue, per-item states, retry, guarded open-in-editor, batch export + archive. Admitted by a total-pixel budget rather than a file count.
+- ✅ Custom export resolution (explicit width × height) and capability-gated AVIF.
+- ⬜ Full error catalog (§11) wired to real failure injection tests.
+- ⬜ Memory/large-image matrix (12/24/50 MP) and a device-class latency table published from the harness. Both need measurements that do not exist (§7).
+- ⬜ Multithreaded WASM fallback — requires COOP/COEP headers, which the current static hosting cannot serve, so the CPU fallback is single-threaded.
+- ⬜ A `validate:manifest` script wired into CI (schema, MIT rule, checksum).
+- ⬜ Privacy audit: a real network-off run of the shipped flow.
+- Exit criteria: release checklist green — benchmark gate, offline test, privacy audit, license manifest complete. **Not met.**
 
 ### Deferred (not V1 unless gated)
 
-- High-quality second tier (GPU-only; cut 2026-09-29, fast tier suffices for V1).
+- High-quality second tier (GPU-only; cut 2026-09-29, fast tier suffices for V1). `tier`/`hint` return with it (§4.2).
+- Promptable segmentation for guided select (independent gate; §4.4).
 - Object eraser / inpainting (independent model gate).
 - AVIF export where encoding is unavailable, HEIC decode without bundled decoder.
 - Accounts, cloud, templates, API service, video.
@@ -377,7 +427,7 @@ Weights, fixtures, and exports never enter git. Bundle contains code + manifests
 - [x] Undo/redo covers all op classes; stroke coalescing verified. (AI ops, brush strokes, guided, recompute, effects, background, transform — one interleaved timeline; verified button-state cycle + restore in-app 2026-09-29/30. Keyboard slider edits are one undo step per gesture, coalesced across a drag or a key-repeat burst.)
 - [x] Region recompute leaves outside-region alpha bit-identical. (adapter patches bbox + 6px blend band only; commit verified in-app 2026-09-30)
 - [ ] Batch of N completes sequentially with per-item retry; one failure doesn't block the rest. (queue landed; memory bounded by a pixel budget rather than a file count)
-- [x] Offline-after-cache full flow passes. (return-visit run; full network-off test still to schedule)
+- [ ] Offline-after-cache full flow passes. (return-visit-no-download verified; **a network-off run of the full flow has not been done** — see §10)
 - [x] OOM/decode/download failures show actionable messages with technical expand. (verified: model-start failure screen; a crashed inference worker now rejects its pending requests instead of spinning forever)
-- [ ] Benchmark torture set re-run on release model revisions; no regression vs gate.
-- [x] `models/manifest.json` complete (name, source, revision, license, checksum) for every shipped artifact; no weights in git. (checksums: lite fp16 + quality fp16)
+- [ ] Benchmark torture set re-run on release model revisions; no regression vs gate. (**nothing to regress against** — the gate produced no passing harness measurement; see §9 and `benchmarks/GATE.md`)
+- [x] `models/manifest.json` complete (name, source, revision, license) for every shipped artifact; no weights in git. (one shipped artifact: `birefnet-lite`, fp16 checksum computed by hand 2026-09-29. `rmbg-1.4` is BYOM-only and ships `"checksum": null` / `"files": []`, which the unenforced schema permits — §5.6)

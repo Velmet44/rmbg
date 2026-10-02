@@ -44,8 +44,8 @@
     }
   ],
   "notes": {
-    "weightsPolicy": "Weights are never committed to git. This manifest is the only record; the harness verifies license + revision before measuring.",
-    "checksum": "checksum fields are filled by the harness after first verified download (SHA-256 of the fetched onnx files) and then pinned.",
+    "weightsPolicy": "Weights are never committed to git. This manifest is the only record. It is maintained BY HAND: no validator, npm script, test or CI step reads it, and the benchmark harness takes --model=<hf-id> free-form without consulting it. The MIT-only default rule in models/LICENSE-AUDIT.md is therefore enforced by human review, not by code.",
+    "checksum": "NOT harness-generated. The SHA-256 on birefnet-lite was computed once, out of band, on 2026-09-29 over the CDN-fetched onnx/model_fp16.onnx, and no automated step recomputes or verifies it. A revision bump that keeps the same model id would be loaded silently. rmbg-1.4 ships a null checksum because it is BYOM-only and RMBG does not host or fetch those weights.",
     "qualityTier": "REMOVED 2026-09-29: the BiRefNet-512 GPU-only checkpoint was cut from the app per scope (fast tier is good enough for V1). Provenance preserved in git history + benchmarks/GATE.md."
   }
 }

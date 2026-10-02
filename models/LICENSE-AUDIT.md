@@ -25,4 +25,10 @@ BiRefNet code + weights are published MIT by the authors (CAAI AIR 2024). The
 - The harness refuses to measure any artifact whose manifest license is not
   `MIT` unless it is flagged `byom-only`/`reference` (measured locally only,
   never shipped).
+  **Not implemented (2026-10-02).** This is the correct policy, but nothing
+  enforces it: `measure.mjs` takes `--model=<hf-id>` as free-form text, never
+  opens this manifest, and never looks at a license. Enforcement today is manual
+  — a human reads the table below and the manifest's `license` field before
+  believing any number. A `validate:manifest` script that checks the MIT rule
+  against the manifest schema is Stage 4 work, not current behaviour.
 - Re-verify on every revision bump: license tag + card text + revision pin.
