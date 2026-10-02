@@ -18,6 +18,13 @@ export type TransformersDevice = 'auto' | 'webgpu' | 'wasm';
 export const DEFAULT_RUNTIME_URL =
   'https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.0/+esm';
 
+/** Cache bucket the Transformers.js runtime writes weights into (`env.cacheName`
+ *  default). The app probes this bucket to answer "already cached?" before the
+ *  session is built; hardcoding the string in the app meant a runtime change
+ *  silently reported "not cached" forever and re-downloaded ~98 MB. Read back
+ *  from the runtime after load (see `cacheName`) so drift is self-correcting. */
+export const RUNTIME_CACHE_NAME = 'transformers-cache';
+
 async function loadRuntime(url: string): Promise<any> {
   // @vite-ignore: absolute URL, resolved by the browser at runtime.
   return import(/* @vite-ignore */ url);
@@ -48,6 +55,11 @@ export class TransformersAdapter implements SegmentationAdapter {
   /** Human-readable GPU description from probing (for UI + diagnostics). */
   gpuDescription: string = 'unknown';
 
+  /** Cache bucket in force. Defaults to `RUNTIME_CACHE_NAME`; replaced with the
+   *  runtime's own value once the library is loaded, so consumers (the app's
+   *  pre-flight cache probe) never probe a bucket the runtime does not use. */
+  cacheName: string = RUNTIME_CACHE_NAME;
+
   get runtimeUrl(): string { return this.opts.runtimeUrl ?? DEFAULT_RUNTIME_URL; }
 
   private runtime(): Promise<any> {
@@ -68,8 +80,9 @@ export class TransformersAdapter implements SegmentationAdapter {
   }
 
   private async doInit(progress?: (p: ModelProgress) => void): Promise<void> {
-    const { pipeline, RawImage } = await this.runtime();
+    const { pipeline, RawImage, env } = await this.runtime();
     this.RawImageCtor = RawImage;
+    if (env?.cacheName) this.cacheName = env.cacheName;
     const want = this.opts.device ?? 'auto';
     // Never benchmark-or-hang on a software rasterizer: SwiftShader/llvmpipe
     // can grind for tens of minutes instead of failing cleanly. Detect it

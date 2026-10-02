@@ -1,4 +1,4 @@
-import type { AlphaMask, BBox, BrushStroke } from './types.js';
+import type { AlphaMask, BBox, BrushStroke, Effects } from './types.js';
 import { clampBox } from './mask.js';
 
 /** Paint one soft stamp. target 0 = erase, 1 = restore. Returns affected bbox. */
@@ -99,6 +99,18 @@ export function contractInPlace(m: AlphaMask, px: number): void {
       m.alpha[y * w + x] = mn;
     }
   }
+}
+
+/** Contract (defringe) then feather, in place, in that order: pulling the
+ *  fringe in before softening keeps the feather from re-spreading it.
+ *
+ *  This is the only definition of "refine edges" — the Engine facade and the
+ *  app both call it, so the finishing maths cannot drift between them. The
+ *  caller owns whether it runs on the canonical mask or on a presentation
+ *  copy; the engine only owns the math. */
+export function refineEdges(m: AlphaMask, fx: Pick<Effects, 'feather' | 'defringe'>): void {
+  if (fx.defringe > 0) contractInPlace(m, fx.defringe);
+  if (fx.feather > 0) featherInPlace(m, fx.feather);
 }
 
 export function snapshotRegion(m: AlphaMask, b: BBox): { box: BBox; data: Float32Array } {

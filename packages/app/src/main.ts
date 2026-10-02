@@ -4,19 +4,16 @@
 // the page stays responsive; compositing/export stay on the main thread.
 // Everything runs on-device: model bytes go to the browser cache once,
 // image pixels never leave. Single model tier (fast).
-//
-// Not yet wired: custom export resolution.
 
 import {
   OpLog,
-  applyBrushStroke,
+  RUNTIME_CACHE_NAME,
   boxDownsampleRGB,
   composite,
-  contractInPlace,
-  featherInPlace,
   growRegion,
   invertTransformPoint,
   isIdentityTransform,
+  refineEdges,
   transformSubject,
   upsampleAlphaBilinear,
   type AlphaMask,
@@ -28,6 +25,7 @@ import {
   type ModelProgress,
   type SubjectTransform,
 } from '@rmbg/engine';
+import { MODEL_ID, MODEL_REV, MODEL_WEIGHTS_RE } from './model-config';
 
 const W = window as unknown as Record<string, any>;
 const $ = (s: string) => document.querySelector(s) as HTMLElement;
@@ -95,8 +93,7 @@ function derivedView(): { image: ImageRef; mask: AlphaMask } {
   }
   if (state.fx.feather > 0 || state.fx.defringe > 0) {
     const copy: AlphaMask = { width: mask.width, height: mask.height, alpha: new Float32Array(mask.alpha) };
-    if (state.fx.defringe > 0) contractInPlace(copy, state.fx.defringe);
-    if (state.fx.feather > 0) featherInPlace(copy, state.fx.feather);
+    refineEdges(copy, state.fx);
     mask = copy;
   }
   return { image, mask };
@@ -106,11 +103,11 @@ function derivedView(): { image: ImageRef; mask: AlphaMask } {
 // One request at a time (the worker enforces it too); responses route by id.
 // Progress events stream separately so the bar and phase text stay live.
 const worker = new Worker(new URL('./infer-worker.ts', import.meta.url), { type: 'module' });
-// Must match infer-worker.ts + models/manifest.json (issue-diagnostics display only).
-const MODEL_ID = 'studioludens/birefnet-lite-512';
-const MODEL_REV = '4a3c40c36c94093cc1e724d9ea428b8fa4b57dc7';
 /** GPU description from the worker probe (unknown until first init). */
 let gpuDesc = 'unknown';
+/** Cache bucket to probe for "already downloaded". Seeded from the engine's
+ *  constant, then overwritten by the runtime's own value once it reports in. */
+let cacheName: string = RUNTIME_CACHE_NAME;
 let reqId = 0;interface Pending {
   resolve: (v: any) => void;
   reject: (e: Error) => void;
@@ -142,13 +139,35 @@ worker.onmessage = (e: MessageEvent) => {
   if (m?.type === 'error') p.reject(new Error(m.message || 'worker failed'));
   else p.resolve(m);
 };
+/** A crashed worker is terminated, not restarted: every later postMessage is
+ *  silently dropped, so each request would hang forever. Latch the failure and
+ *  reject immediately instead. */
+let workerDead = false;
+function failAllPending(message: string) {
+  workerDead = true;
+  const err = new Error(message);
+  const waiters = [...pending.values()];
+  pending.clear();
+  for (const p of waiters) p.reject(err);
+}
 worker.onerror = (e) => {
-  W.toast?.(`Background worker crashed: ${(e as ErrorEvent).message || 'unknown'} — reload to retry`, true);
+  const msg = (e as ErrorEvent).message || 'unknown error';
+  stopElapsed();
+  failAllPending(`worker crashed: ${msg}`);
+  W.toast?.(`Background worker crashed: ${msg.slice(0, 120)} — reload to retry`, true);
+};
+worker.onmessageerror = (e) => {
+  stopElapsed();
+  failAllPending(`worker message could not be deserialized: ${String(e).slice(0, 120)}`);
+  W.toast?.('Worker communication failed — reload to retry', true);
 };
 function callWorker(
   msg: Record<string, any>, transfer?: Transferable[],
   onProgress?: Pending['onProgress'],
 ): Promise<any> {
+  if (workerDead) {
+    return Promise.reject(new Error('The inference worker crashed — reload the page to retry'));
+  }
   const id = ++reqId;
   return new Promise((resolve, reject) => {
     pending.set(id, { resolve, reject, onProgress });
@@ -183,9 +202,9 @@ function fmtMB(n: number): string {
  *  a miss, or the UI claims "cached" and then stalls with no byte events.) */
 async function isModelCached(): Promise<boolean> {
   try {
-    const cache = await caches.open('transformers-cache');
+    const cache = await caches.open(cacheName);
     const keys = await cache.keys();
-    return keys.some((r) => /birefnet-lite-512.*\.onnx/i.test(r.url));
+    return keys.some((r) => MODEL_WEIGHTS_RE.test(r.url));
   } catch {
     return false; // Cache API unavailable (private mode etc.) → assume miss
   }
@@ -297,6 +316,8 @@ async function ensureReady(): Promise<void> {
     const res = await callWorker({ type: 'init' }, undefined, (p) => tracker.onEvent(p));
     state.backend = res.backend ?? 'unknown';
     gpuDesc = res.gpu ?? 'unknown';
+    // Trust the runtime's own cache bucket over our seed.
+    if (typeof res.cacheName === 'string' && res.cacheName) cacheName = res.cacheName;
     const gpu = $('#gpuLine') as HTMLElement | null;
     if (gpu) gpu.textContent = `GPU: ${res.gpu ?? 'unknown'} → ${state.backend}`;
   } finally {
@@ -444,7 +465,22 @@ function drawMaskGray(target: HTMLCanvasElement, mask: AlphaMask) {
   ctx.putImageData(id, 0, 0);
 }
 
-function refreshDisplay() {
+/** Redraw the canvas stack. Coalesced onto one animation frame: every mode
+ *  switch re-derives a FULL-RESOLUTION composite (a Float32 clone plus a
+ *  full-res putImageData), and the finishing sliders fire `input` per pointer
+ *  move — so firing this directly re-composited a 12 MP image dozens of times
+ *  per drag and pinned the main thread. Coalescing also removes any re-entrancy
+ *  risk against the shared `blit` scratch canvas. */
+let displayRaf: number | null = null;
+function refreshDisplay(): void {
+  if (displayRaf !== null) return;
+  displayRaf = requestAnimationFrame(() => {
+    displayRaf = null;
+    renderDisplay();
+  });
+}
+
+function renderDisplay() {
   if (!state.image || !state.mask || !resultCanvas) return;
   syncUndoRedo();
   syncStrokeButtons();
@@ -513,9 +549,9 @@ async function realLoadFile(f: File) {
     const up = $('#uploadedImg') as HTMLImageElement;
     up.src = state.previewURL;
     $('#dimLbl').textContent = `${ref.width} × ${ref.height}`;
-    $('#expDims').textContent = `${ref.width} × ${ref.height} · PNG · transparent`;
     ensureCanvases(ref);
     if (!finishingWired) { wireFinishing(); finishingWired = true; }
+    // resetExportRes() ends in refreshExpDims(), which owns #expDims.
     resetExportRes();
     W.startPreparing(false);
   } catch (e) {
@@ -670,6 +706,11 @@ function guardSplit(): boolean {
 function realCompare(m: string) {
   revealToken++;
   lastCompare = m;
+  // Mirror into the shell's compareMode: the `B` shortcut there reads its own
+  // binding to decide which way to toggle, and a module can assign to a global
+  // `var` but never to a script-scoped `let`. Left unsynced, `B` always
+  // resolved to "before" and the second press did nothing.
+  W.compareMode = m;
   (W as any).__rmbgSplitLock = (m === 'split');
   ($('#splitUI') as HTMLElement).classList.toggle('on', m === 'split');
   $$('.seg button').forEach((b) => (b as HTMLElement).classList.toggle('on', (b as HTMLElement).dataset.view === m));
@@ -684,6 +725,81 @@ function selectedFormat(): string {
   return on?.dataset.fmt ?? 'PNG';
 }
 
+/** Export drawer's BACKGROUND choice.
+ *  'current'    — use whatever the Background panel set, so the file matches
+ *                 what is on screen (the default; exporting what you see).
+ *  'transparent'— force the cutout only, ignoring the on-screen background.
+ *  This is per-export intent, never written back into `state.bg`: the stored
+ *  background belongs to the editing session, not to one download. */
+let exportBg: 'transparent' | 'current' = 'current';
+
+function effectiveExportBg(): Background {
+  return exportBg === 'transparent' ? { kind: 'transparent' } : state.bg;
+}
+
+function bgHexOf(color: [number, number, number]): string {
+  return '#' + color.map((c) => Math.round(c).toString(16).padStart(2, '0')).join('');
+}
+
+/** JPEG cannot carry alpha. Driven from ONE place: the shell used to toggle
+ *  the warning on format click while syncFxControls toggled it on background
+ *  kind, so the two fought and the warning did not describe the choice the
+ *  export would actually make. */
+function refreshJpegWarn(): void {
+  const el = $('#jpegWarn') as HTMLElement | null;
+  if (!el) return;
+  const lossy = selectedFormat() === 'JPEG' && effectiveExportBg().kind === 'transparent';
+  el.classList.toggle('hidden', !lossy);
+}
+
+/** Explain what the chosen background will actually produce. */
+function refreshExpBgNote(): void {
+  const el = $('#expBgNote') as HTMLElement | null;
+  if (!el) return;
+  if (exportBg === 'transparent') {
+    el.textContent = 'Cutout only — alpha preserved.';
+  } else if (state.bg.kind === 'color') {
+    el.textContent = `Solid ${bgHexOf(state.bg.color ?? [255, 255, 255]).toUpperCase()} from the Background panel.`;
+  } else if (state.bg.kind === 'image') {
+    el.textContent = 'The image from the Background panel.';
+  } else {
+    el.textContent = 'The Background panel is transparent, so this is a cutout.';
+  }
+}
+
+/** Export drawer is static markup: bind format + background once, on load. */
+function wireExportDrawer(): void {
+  // The drawer's derived text (dims, JPEG guard, background note) depends on
+  // state that can change while it is closed, so re-derive on open.
+  ($('#btnExport') as HTMLElement)?.addEventListener('click', refreshExpDims);
+  $$('.fmt').forEach((b) => b.addEventListener('click', () => {
+    $$('.fmt').forEach((x) => x.classList.toggle('on', x === b));
+    ($('#btnDoExport') as HTMLElement).textContent = `Export ${(b as HTMLElement).dataset.fmt}`;
+    refreshExpDims();
+  }));
+  const pairs: [HTMLElement, 'transparent' | 'current'][] = [
+    [$('#expBgTransparent') as HTMLElement, 'transparent'],
+    [$('#expBgCurrent') as HTMLElement, 'current'],
+  ];
+  const pick = (choice: 'transparent' | 'current') => {
+    exportBg = choice;
+    for (const [el, c] of pairs) {
+      el.classList.toggle('on', c === choice);
+      el.setAttribute('aria-checked', String(c === choice));
+    }
+    refreshExpDims();
+  };
+  for (const [el, choice] of pairs) {
+    el.addEventListener('click', () => pick(choice));
+    // The radios are divs, so Enter/Space are not wired for us.
+    el.addEventListener('keydown', (e) => {
+      const k = (e as KeyboardEvent).key;
+      if (k === 'Enter' || k === ' ') { e.preventDefault(); pick(choice); }
+    });
+  }
+  pick('current');
+}
+
 /** Export size state. null = original dimensions. */
 let customRes: { w: number; h: number } | null = null;
 let resLocked = true;
@@ -695,10 +811,14 @@ function exportSize(): { w: number; h: number; custom: boolean } {
 }
 
 function refreshExpDims() {
+  // Guard + background note do not need a loaded image, so refresh them even
+  // before one exists (a format can be picked from the landing build).
+  refreshJpegWarn();
+  refreshExpBgNote();
   if (!state.image) return;
   const { w, h } = exportSize();
   const fmt = selectedFormat();
-  const bg = state.bg.kind === 'transparent' ? 'transparent' : 'with background';
+  const bg = effectiveExportBg().kind === 'transparent' ? 'transparent' : 'with background';
   $('#expDims').textContent = `${w} × ${h} · ${fmt} · ${bg}${customRes ? ' · custom' : ''}`;
 }
 
@@ -768,11 +888,12 @@ async function realExport() {
   try {
     const view = derivedView();
     const size = exportSize();
-    let bg = state.bg;
+    let bg = effectiveExportBg();
     let note = `${size.w} × ${size.h} · ${fmt}`;
     if (fmt === 'JPEG' && bg.kind === 'transparent') {
       // JPEG cannot carry transparency: composite onto white for this export
-      // only (stated, never silent), without touching the stored mask.
+      // only (stated, never silent), without touching the stored mask or the
+      // drawer's background choice.
       bg = { kind: 'color', color: [255, 255, 255] };
       note += ' · flattened onto white (JPEG has no transparency)';
     } else {
@@ -902,7 +1023,7 @@ function installStrokeCapture() {
           softness: s.softness,
         };
         // One undo step per stroke.
-        applyBrushDirect(state.mask, stroke, s.mode);
+        state.log.applyBrush(state.mask, stroke, s.mode);
       }
       const n = pendingStrokes.length;
       clearOverlay();
@@ -911,13 +1032,6 @@ function installStrokeCapture() {
     } catch (err) {
       W.toast(`Apply failed: ${String(err).slice(0, 120)}`, true);
     }
-  });
-}
-
-function applyBrushDirect(mask: AlphaMask, stroke: BrushStroke, mode: 'erase' | 'restore') {
-  state.log.commitRegion(mask, mode, (m) => {
-    const box = applyBrushStroke(m, stroke, mode);
-    return box.w === 0 ? { x: 0, y: 0, w: 0, h: 0 } : box;
   });
 }
 
@@ -957,7 +1071,10 @@ function syncFxControls() {
   ($('#bgColorBox') as HTMLElement)?.classList.toggle('hidden', state.bg.kind !== 'color');
   ($('#bgImageBox') as HTMLElement)?.classList.toggle('hidden', state.bg.kind !== 'image');
   ($('#subjectCard') as HTMLElement)?.classList.toggle('hidden', state.bg.kind === 'transparent');
-  ($('#jpegWarn') as HTMLElement)?.classList.toggle('hidden', state.bg.kind !== 'transparent');
+  // #jpegWarn is NOT toggled here: refreshExpDims (called at the end of this
+  // function) owns it, because it depends on the export drawer's background
+  // choice as well as the panel's. Setting it from both places is what made the
+  // warning describe neither reliably.
   const checker = $('#checker') as HTMLElement;
   checker.style.background = '';
   checker.style.backgroundSize = '';
@@ -970,23 +1087,44 @@ function syncFxControls() {
   refreshExpDims();
 }
 
+/** Slider keys that mutate a range input's value. */
+const SLIDER_KEYS = new Set([
+  'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown',
+]);
+
+/** Bind a finishing slider so one gesture = one undo step, from BOTH mouse and
+ *  keyboard. Two traps this closes:
+ *  - `focus` fires once, so arming the snapshot there meant every arrow-key
+ *    nudge after the first committed outside the history (silently un-undoable).
+ *  - committing on every `change` made a held arrow key or a scrub land dozens
+ *    of entries, so the snapshot is debounced instead.
+ *  Snapshotting on `pointerdown`/`keydown` and ignoring re-arms mid-gesture
+ *  collapses a drag or a key-repeat into a single entry. */
 function bindFxSlider(id: string, label: string, set: (v: number) => void, fmt: (v: number) => string) {
   const el = num(id);
   let before: ParamSnap | null = null;
-  el.addEventListener('pointerdown', () => { before = snapshotParams(); });
-  el.addEventListener('focus', () => { before = snapshotParams(); });
-  el.addEventListener('input', () => { set(+el.value); paintSliderLabel(id, fmt); refreshDisplay(); });
-  el.addEventListener('change', () => {
-    paintSliderLabel(id, fmt);
-    refreshDisplay();
-    if (before) {
-      const after = snapshotParams();
-      const b = before;
-      state.log.commit(label, () => { restoreParams(b); refreshDisplay(); }, () => { restoreParams(after); refreshDisplay(); });
-      before = null;
-      syncUndoRedo();
-    }
-  });
+  let timer: number | null = null;
+  const begin = () => { if (before === null) before = snapshotParams(); };
+  const commit = () => {
+    if (timer !== null) { clearTimeout(timer); timer = null; }
+    const b = before;
+    before = null;
+    if (!b) return;
+    const after = snapshotParams();
+    // A gesture that changed nothing (click without drag, refocus) is not history.
+    if (JSON.stringify(b) === JSON.stringify(after)) return;
+    state.log.commit(label, () => { restoreParams(b); refreshDisplay(); }, () => { restoreParams(after); refreshDisplay(); });
+    syncUndoRedo();
+  };
+  const schedule = () => {
+    if (timer !== null) clearTimeout(timer);
+    timer = window.setTimeout(commit, 400);
+  };
+  el.addEventListener('pointerdown', begin);
+  el.addEventListener('keydown', (e) => { if (SLIDER_KEYS.has(e.key)) begin(); });
+  el.addEventListener('blur', commit);
+  el.addEventListener('input', () => { set(+el.value); paintSliderLabel(id, fmt); refreshDisplay(); schedule(); });
+  el.addEventListener('change', () => { paintSliderLabel(id, fmt); refreshDisplay(); schedule(); });
 }
 
 function wireFinishing() {
@@ -1342,8 +1480,20 @@ const batch: BatchItem[] = [];
 let batchPumping = false;
 let batchBusy = false;
 let batchSeq = 0;
-const BATCH_MAX = 24;
+/** A queued item holds full-res RGB (3 B/px) plus a Float32 mask (4 B/px), so
+ *  the real constraint is pixels, not file count. `BATCH_MAX_ITEMS` alone let
+ *  24 × 12 MP images through — ~1.7 GB — which OOMs a phone rather than
+ *  degrading. 40 MP ≈ 280 MB resident, safe on ordinary mobile hardware.
+ *  ZIP export additionally buffers every PNG, which the same cap bounds. */
+const BATCH_MAX_PIXELS = 40e6;
+const BATCH_MAX_ITEMS = 48;
 let finishingWired = false;
+
+function batchPixels(): number {
+  let px = 0;
+  for (const it of batch) px += it.image.width * it.image.height;
+  return px;
+}
 
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
@@ -1486,9 +1636,21 @@ async function addBatchFiles(fs: FileList | File[]): Promise<void> {
   const list = [...fs].filter((f) => f.type.startsWith('image/'));
   if (list.length === 0) { W.toast('No image files', true); return; }
   for (const f of list) {
-    if (batch.length >= BATCH_MAX) { W.toast(`Batch capped at ${BATCH_MAX} images`, true); break; }
+    if (batch.length >= BATCH_MAX_ITEMS) { W.toast(`Batch capped at ${BATCH_MAX_ITEMS} images`, true); break; }
     try {
       const ref = await decodeToImageRef(f, f.name || `img-${++batchSeq}`);
+      // Dimensions are only known after decoding; the rejected buffer is
+      // transient and collectable, so the check costs one decode, not memory.
+      const used = batchPixels(), px = ref.width * ref.height;
+      if (used + px > BATCH_MAX_PIXELS) {
+        const left = Math.max(0, BATCH_MAX_PIXELS - used);
+        W.toast(
+          `Batch memory budget reached (${(used / 1e6).toFixed(0)} / ${(BATCH_MAX_PIXELS / 1e6).toFixed(0)} MP` +
+          `${left > 0 ? `, ~${(left / 1e6).toFixed(0)} MP left` : ''}) — ${f.name} not added`,
+          true,
+        );
+        break;
+      }
       batch.push({
         id: `${Date.now()}-${batchSeq++}`, name: f.name || 'image',
         image: ref, thumb: thumbURL(ref), status: 'queued',
@@ -1518,7 +1680,6 @@ function openBatchItem(it: BatchItem) {
   up.src = state.previewURL;
   ($('#demoSubject') as HTMLElement).style.display = 'none';
   $('#dimLbl').textContent = `${it.image.width} × ${it.image.height}`;
-  $('#expDims').textContent = `${it.image.width} × ${it.image.height} · PNG · transparent`;
   ensureCanvases(it.image);
   if (!finishingWired) { wireFinishing(); finishingWired = true; }
   resetExportRes();
@@ -1667,35 +1828,12 @@ const batchPicker = (() => {
   return el;
 })();
 
-// ---------- footer: live star count (cached, silent) ----------
-// One GitHub API call per day max, 5s timeout, invisible on failure
-// (offline, private mode, rate-limited). No third-party embed in HTML.
-async function paintStars(): Promise<void> {
-  const pill = $('#starPill') as HTMLElement | null;
-  const num = $('#starN') as HTMLElement | null;
-  if (!pill || !num) return;
-  const KEY = 'rmbg-stars';
-  try {
-    const cached = JSON.parse(localStorage.getItem(KEY) ?? 'null') as { n: number; t: number } | null;
-    if (cached && typeof cached.n === 'number' && Date.now() - cached.t < 86400000) {
-      num.textContent = String(cached.n);
-      pill.classList.remove('hidden');
-      return;
-    }
-  } catch { /* corrupted cache: refetch below */ }
-  try {
-    const ctl = new AbortController();
-    const to = setTimeout(() => ctl.abort(), 5000);
-    const r = await fetch('https://api.github.com/repos/Velmet44/rmbg', { signal: ctl.signal });
-    clearTimeout(to);
-    if (!r.ok) return;
-    const j = await r.json() as { stargazers_count?: number };
-    if (typeof j.stargazers_count !== 'number') return;
-    try { localStorage.setItem(KEY, JSON.stringify({ n: j.stargazers_count, t: Date.now() })); } catch { /* private mode */ }
-    num.textContent = String(j.stargazers_count);
-    pill.classList.remove('hidden');
-  } catch { /* offline etc: pill stays hidden */ }
-}
+// ---------- footer ----------
+// NOTE: the live GitHub star counter was removed here. It fired an
+// `api.github.com` request on every visitor's first load of the day, which
+// discloses their IP to a third party on a page whose entire promise is
+// "no analytics, no tracking, no upload" (SPEC §10). The footer keeps a plain
+// link to the repository instead.
 
 // ---------- issue reporter ----------
 // Toasts + window errors feed a small ring buffer so a GitHub issue draft
@@ -1712,7 +1850,7 @@ function buildDiag(logLines = 30): string {
   L.push('### App diagnostics (auto-collected, no image pixels included)');
   L.push(`- Time: ${new Date().toISOString()}`);
   L.push(`- Backend: ${state.backend} (GPU: ${gpuDesc})`);
-  L.push(`- Model: ${MODEL_ID} rev ${MODEL_REV}`);
+  L.push(`- Model: ${MODEL_ID} rev ${MODEL_REV} (cache bucket: ${cacheName})`);
   L.push(`- Image: ${state.image ? `${state.image.width}x${state.image.height}` : 'none loaded'}`);
   L.push(`- Mask: ${state.mask ? `${state.mask.width}x${state.mask.height}` : 'none'}`);
   L.push(`- Background: ${state.bg.kind}; shadow ${state.fx.shadow.on ? 'on' : 'off'}` +
@@ -1762,7 +1900,7 @@ W.runExport = realExport;
 installStrokeCapture();
 syncStrokeButtons();
 installRefineCapture();
-void paintStars();
+wireExportDrawer();
 // Scroll reveal for the FAQ (and anything else marked .reveal): fade/slide
 // in on entry, once. Root is the landing scroller; reduced-motion users
 // get everything visible immediately via CSS.
@@ -1848,7 +1986,8 @@ $('#btnRecompute').addEventListener('click', () => { void rerun(); });
     if (fs && fs.length > 0) void addBatchFiles(fs);
   });
   const pill = document.querySelector('#view-batch .pill') as HTMLElement | null;
-  if (pill) pill.textContent = 'On-device · sequential';
+  // Disclose the cap rather than letting a silent refusal surprise the user.
+  if (pill) pill.textContent = `On-device · sequential · ≤${BATCH_MAX_PIXELS / 1e6} MP in memory`;
   renderBatch(); // clear the mockup's toy tiles on boot
 }
 function syncUndoRedo() {

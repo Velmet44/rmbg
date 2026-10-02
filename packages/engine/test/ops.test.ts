@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createMask } from '../src/mask.js';
-import { applyBrushStroke, contractInPlace, featherInPlace } from '../src/ops.js';
+import { applyBrushStroke, contractInPlace, featherInPlace, refineEdges } from '../src/ops.js';
 
 describe('brush ops', () => {
   it('erase drives the center to 0, restore brings it back', () => {
@@ -39,5 +39,43 @@ describe('brush ops', () => {
     expect(edge).toBeLessThan(0.8);
     contractInPlace(m, 3);
     expect(m.alpha[10 * 20 + 10]).toBeLessThan(edge);
+  });
+
+  it('refineEdges is a no-op at zero and mutates in place otherwise', () => {
+    const build = () => {
+      const m = createMask(20, 20, 0);
+      for (let y = 0; y < 20; y++) for (let x = 10; x < 20; x++) m.alpha[y * 20 + x] = 1;
+      return m;
+    };
+    const untouched = build();
+    const snapshot = Float32Array.from(untouched.alpha);
+    refineEdges(untouched, { feather: 0, defringe: 0 });
+    expect(Array.from(untouched.alpha)).toEqual(Array.from(snapshot));
+
+    const m = build();
+    refineEdges(m, { feather: 2, defringe: 3 });
+    // Same object mutated in place — callers rely on getting their copy back.
+    expect(m.alpha[10 * 20 + 10]).toBeLessThan(1);
+    expect(m.alpha[10 * 20 + 12]).toBeLessThan(1);
+  });
+
+  it('refineEdges contracts before it feathers', () => {
+    // Order matters: feathering first would soften the fringe and then
+    // contract would pull the already-spread edge back in, netting a different
+    // (wider, softer) result than the intended "pull in, then soften".
+    const build = () => {
+      const m = createMask(24, 24, 0);
+      for (let y = 4; y < 20; y++) for (let x = 4; x < 20; x++) m.alpha[y * 24 + x] = 1;
+      return m;
+    };
+    const fx = { feather: 2, defringe: 2 };
+    const combined = build();
+    refineEdges(combined, fx);
+
+    const manual = build();
+    contractInPlace(manual, fx.defringe);
+    featherInPlace(manual, fx.feather);
+
+    expect(Array.from(combined.alpha)).toEqual(Array.from(manual.alpha));
   });
 });

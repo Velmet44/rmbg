@@ -42,6 +42,28 @@ effective to HF CDN (US AWS from India). No usable GPU (SwiftShader only).
 download/session-build split timing, software-WebGPU auto-skip,
 WebGPU→WASM fallback, `--inferSize` bisection support.
 
+## App-layer defect fixes (2026-10-02, no model change)
+
+Behaviour defects found by review and then verified in a real browser against
+the production build. No inference, mask, or model-provenance change — the
+engine's own maths is untouched apart from being deduplicated.
+
+| Fix | Evidence |
+|---|---|
+| Export drawer's `Transparent` / `Current background` radios had no ids or handlers; the choice was silently ignored and always used the on-screen background. Now wired, with the outcome stated in the drawer. | both radios toggle; `#expDims` reads `transparent` vs `with background`; note names the actual background (`Solid #FF0000…`) |
+| JPEG-transparency warning was toggled from two places (shell on format click, `syncFxControls` on background kind) and so described neither. Single owner now, driven by the effective choice. | JPEG+transparent warns, JPEG+background hidden, PNG+transparent hidden |
+| `object-fit:cover` on `#uploadedImg` cropped the original; the checker's `1px` border under `box-sizing:border-box` also shrank the content box 2px, so the img, result/split canvases and paint overlay disagreed by a hair. Border → inset shadow; `contain`. | content box == border box (delta `[0,0]`); 1000×400 image → 640×256 box, 0.00px crop; paint backing == box == `640×256` |
+| Two undo histories existed (mockup `undoStack` + real `OpLog`); `pushHist` re-enabled `#btnUndo` and fought the real sync. Mock stack and all 12 call sites deleted. | `pushHist`/`syncHist`/`undoStack` absent from the page; one timeline |
+| A crashed inference worker never rejected its pending requests, so the preparing screen spun forever. Now rejects all in-flight work, stops the clock, and latches so later calls fail fast instead of hanging on a dead worker. | forced crash surfaces the error in ~110ms; retry fails fast in ~110ms |
+| Keyboard slider edits after the first nudge never entered the history (`focus` fires once). Now arms on `pointerdown`/`keydown` and debounces, so a drag or a key-repeat burst is one entry. | 4 arrow presses → depth +1; undo restores; a second gesture → +1 again |
+| Full-res composite ran on every slider `input` (Float32 clone + full-res `putImageData`). Coalesced onto one animation frame. | 12 `input` events → 1 `putImageData` |
+| Batch capped at 24 files regardless of size (~1.7 GB at 12 MP). Now bounded by total pixels and the cap is stated in the UI. | 16 × 3 MP offered → 13 queued; toast `Batch memory budget reached (39 / 40 MP, ~1 MP left)` |
+| `B` compare shortcut could not toggle back: the shell's `let compareMode` is invisible to a module. Now `var`, mirrored by `realCompare`. | after → before → after |
+| Footer star counter called `api.github.com` on load, contradicting the no-tracking promise. Removed. | zero non-localhost requests on load |
+| `MODEL_ID`/`MODEL_REV`/cache-bucket name duplicated across `main.ts` and the worker. Single `src/model-config.ts`; bucket re-read from the runtime's `env.cacheName`. | typecheck clean; `Model:` diagnostic line reports both |
+| `Engine.applyBrush`/`refineEdges` were dead (app called raw fns). Both now share one implementation (`OpLog.applyBrush`, `refineEdges`). | +5 engine tests (35 total, all green) |
+| No `tsc` gate — `vite build` never typechecked. Both packages now typecheck, and the app `build` runs `tsc --noEmit` first. | `npm run build` fails on a type error |
+
 ## PENDING (need adequate hardware: real GPU or stronger CPU)
 
 - In-browser cold/warm inference numbers for the quality tier.

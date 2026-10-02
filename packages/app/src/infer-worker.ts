@@ -3,8 +3,7 @@
 // No DOM in this file: engine + adapter only. Everything stays on-device;
 // the worker fetches model bytes into the same browser cache as the page.
 import { TransformersAdapter, createEngine, type ImageRef } from '@rmbg/engine';
-
-const MODEL_ID = 'studioludens/birefnet-lite-512';
+import { MODEL_ID } from './model-config';
 
 const adapter = new TransformersAdapter(MODEL_ID, { device: 'auto' });
 const engine = createEngine(adapter);
@@ -20,7 +19,13 @@ self.onmessage = async (e: MessageEvent) => {
       await adapter.init((p) =>
         (self as any).postMessage({ id: msg.id, type: 'progress', ...p }),
       );
-      (self as any).postMessage({ id: msg.id, type: 'ready', backend: adapter.backend, gpu: (adapter as any).gpuDescription ?? 'unknown' });
+      // Report the model identity and the cache bucket actually in force, so
+      // the main thread probes the bucket this runtime writes to.
+      (self as any).postMessage({
+        id: msg.id, type: 'ready',
+        backend: adapter.backend, gpu: adapter.gpuDescription,
+        model: MODEL_ID, cacheName: adapter.cacheName,
+      });
     } catch (err) {
       (self as any).postMessage({ id: msg.id, type: 'error', message: String(err).slice(0, 300) });
     }

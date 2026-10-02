@@ -4,6 +4,9 @@
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "strict": true,
+    "noEmit": true,
+    "noUnusedLocals": true,
+    "noFallthroughCasesInSwitch": true,
     "skipLibCheck": true,
     "declaration": false,
     "sourceMap": false

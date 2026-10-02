@@ -148,9 +148,17 @@
   .stage.panning{cursor:grabbing}
   .stage.brushing{cursor:none}
   #viewport{position:absolute;left:50%;top:50%;transform-origin:center center}
+  /* The 1px frame is an inset box-shadow, NOT a border: with the global
+     box-sizing:border-box a border would make the content box 2px smaller than
+     the size fitChecker computed, so the aspect ratio drifted from the image
+     and every layer inside (#uploadedImg, the result/split canvases, the paint
+     overlay) disagreed by a pixel or two — visible as a cutout that did not
+     line up with the original, and as brush strokes landing off-target.
+     inset:0 layers then all resolve to the exact image aspect ratio. */
   .checker{background-image:conic-gradient(#20262d 0 25%,#171c21 0 50%,#20262d 0 75%,#171c21 0);
-    background-size:16px 16px;border-radius:6px;box-shadow:0 30px 80px rgba(0,0,0,.6);
-    border:1px solid #2b333c;overflow:hidden;position:relative}
+    background-size:16px 16px;border-radius:6px;
+    box-shadow:0 30px 80px rgba(0,0,0,.6),inset 0 0 0 1px #2b333c;
+    overflow:hidden;position:relative}
   .checker img,.checker svg{display:block}
   #paintLayer{position:absolute;inset:0;pointer-events:none}
   #brushRing{position:fixed;display:none;width:60px;height:60px;border:1.5px solid #fff;border-radius:50%;
@@ -395,8 +403,6 @@
   #landingFoot a{color:var(--muted);text-decoration:none;display:inline-flex;align-items:center;gap:6px}
   #landingFoot a:hover{color:var(--text)}
   #landingFoot svg{width:15px;height:15px;flex:0 0 15px}
-  #landingFoot .starpill{border:1px solid var(--border);border-radius:99px;padding:2px 9px;
-    font-weight:700;color:var(--muted);font-family:var(--mono);font-size:11px;white-space:nowrap}
   #landingFoot .fsep{color:#2b333c;user-select:none}
   .dropzone:hover,.dropzone.drag{box-shadow:0 0 0 4px rgba(52,211,153,.07),0 14px 34px rgba(0,0,0,.45)}
 
@@ -533,7 +539,6 @@
     <a href="https://github.com/Velmet44/rmbg" target="_blank" rel="noopener" aria-label="RMBG on GitHub">
       <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="6.5"/><path d="M6 5.5 3.5 8 6 10.5M10 5.5 12.5 8 10 10.5"/></svg>
       <span>GitHub</span>
-      <span class="starpill hidden" id="starPill" title="GitHub stars">★ <b id="starN"></b></span>
     </a>
     <span class="fsep" aria-hidden="true">·</span>
     <a href="https://github.com/Velmet44/rmbg/issues" target="_blank" rel="noopener">Report an issue</a>
@@ -609,7 +614,10 @@
             <div id="maskView" style="display:none;position:absolute;inset:0;background:#000;align-items:center;justify-content:center">
               <svg width="70%" height="70%" viewBox="0 0 520 380" preserveAspectRatio="xMidYMid meet"><rect width="520" height="380" fill="#000"/><rect x="231" y="78" width="58" height="44" rx="9" fill="#fff"/><rect x="241" y="116" width="38" height="44" fill="#fff"/><rect x="205" y="150" width="110" height="182" rx="28" fill="#fff"/><rect x="205" y="220" width="110" height="58" fill="#777"/></svg>
             </div>
-            <img id="uploadedImg" alt="" style="display:none;position:absolute;inset:0;width:100%;height:100%;object-fit:cover"/>
+            <!-- object-fit:contain, not cover: the canvas layers fill the box
+                 exactly, so `cover` cropped the original wherever the box aspect
+                 did not match and the two layers no longer lined up. -->
+            <img id="uploadedImg" alt="" style="display:none;position:absolute;inset:0;width:100%;height:100%;object-fit:contain"/>
             <canvas id="paintLayer"></canvas>
           </div>
           </div>
@@ -827,8 +835,9 @@
       <div class="dims" id="resNote"></div>
     </div>
     <div class="cap2">BACKGROUND</div>
-    <div class="radio on"><span class="r"></span>Transparent</div>
-    <div class="radio"><span class="r"></span>Current background</div>
+    <div class="radio on" id="expBgTransparent" role="radio" aria-checked="true" tabindex="0"><span class="r"></span>Transparent</div>
+    <div class="radio" id="expBgCurrent" role="radio" aria-checked="false" tabindex="0"><span class="r"></span>Current background</div>
+    <p class="tip" id="expBgNote"></p>
     <div class="progress hidden" id="expProgWrap" style="margin-top:16px"><i id="expBar"></i></div>
     <div class="row" style="margin-top:16px"><button class="btn primary" id="btnDoExport">Export PNG</button></div>
     <p class="tip" id="expNote">Pick a format, then Export.</p>
@@ -893,13 +902,10 @@ function showView(id){
   if(id==="view-editor") requestAnimationFrame(()=>{sizePaint();fitZoom(false)});
 }
 
-/* undo/redo mock stacks */
-let undoStack=[], redoStack=[];
-function pushHist(label){undoStack.push(label); if(undoStack.length>40)undoStack.shift(); redoStack=[]; syncHist();}
-function syncHist(){$("#btnUndo").disabled=!undoStack.length; $("#btnRedo").disabled=!redoStack.length;}
-$("#btnUndo").onclick=()=>{if(!undoStack.length)return; redoStack.push(undoStack.pop()); syncHist(); toast("Undone");};
-$("#btnRedo").onclick=()=>{if(!redoStack.length)return; undoStack.push(redoStack.pop()); syncHist(); toast("Redone");};
-syncHist();
+/* undo/redo: owned by src/main.ts over the engine's OpLog.
+   This shell used to keep a second mock stack and call pushHist() from every
+   control, which re-enabled #btnUndo via syncHist() and fought the real
+   syncUndoRedo() — the button state depended on which history fired last. */
 
 /* landing */
 const dz=$("#dropzone"), fi=$("#fileInput");
@@ -969,7 +975,7 @@ function setTool(name){
 $$("[data-tool]").forEach(b=>b.onclick=()=>setTool(b.dataset.tool));
 $("#btnBack").onclick=()=>showView("view-landing");
 $("#btnNewImage").onclick=()=>showView("view-landing");
-$("#btnSaveState").onclick=()=>{pushHist("save");toast("State saved locally");};
+$("#btnSaveState").onclick=()=>toast("State saved locally");
 $$("[data-goto]").forEach(b=>b.onclick=()=>showView("view-"+b.dataset.goto));
 
 /* refine sub-modes */
@@ -986,14 +992,14 @@ $$("[data-br]").forEach(b=>b.onclick=()=>{
   if(!brushMode)hideBrushRing();
   toast(subBrush==="guided"?"Guided: click an area"+MOCK:subBrush==="recompute"?"Drag a box, then Recompute"+MOCK:(subBrush==="restore"?"Restore brush ready":"Erase brush ready"));
 });
-$$("[data-g]").forEach(b=>b.onclick=()=>{$$("[data-g]").forEach(x=>x.classList.toggle("on",x===b)); pushHist("guided"); toast("Guided region selected"+MOCK);});
-$("#btnRecompGo").onclick=()=>{runScan("Recomputing selection…"); pushHist("recompute");};
-$("#btnRecompute").onclick=()=>{runScan("Recomputing…"); pushHist("recompute");};
+$$("[data-g]").forEach(b=>b.onclick=()=>{$$("[data-g]").forEach(x=>x.classList.toggle("on",x===b)); toast("Guided region selected"+MOCK);});
+$("#btnRecompGo").onclick=()=>runScan("Recomputing selection…");
+$("#btnRecompute").onclick=()=>runScan("Recomputing…");
 
 /* generic radios + choices */
 $$(".card").forEach(card=>{
   const radios=card.querySelectorAll(":scope > .radio");
-  radios.forEach(r=>r.onclick=()=>{radios.forEach(x=>x.classList.toggle("on",x===r)); pushHist("param");});
+  radios.forEach(r=>r.onclick=()=>{radios.forEach(x=>x.classList.toggle("on",x===r));});
 });
 $$("[data-ai]").forEach(r=>r.onclick=()=>{
   $$("[data-ai]").forEach(x=>x.classList.toggle("on",x===r));
@@ -1007,18 +1013,17 @@ $$("[data-bg]").forEach(b=>b.onclick=()=>{
   $("#subjectCard").classList.toggle("hidden",v==="transparent");
   $("#checker").style.background=v==="color"?$("#bgColor").value:"";
   $("#checker").style.backgroundSize=v==="color"?"auto":"";
-  pushHist("background");
 });
 $("#bgColor").oninput=e=>{$("#bgHex").textContent=e.target.value.toUpperCase(); $("#checker").style.background=e.target.value;};
 $$(".sw").forEach(s=>s.onclick=()=>{
   $$(".sw").forEach(x=>x.classList.toggle("on",x===s));
   $("#bgColor").value=s.dataset.c; $("#bgHex").textContent=s.dataset.c.toUpperCase();
-  $("#checker").style.background=s.dataset.c; pushHist("bgcolor");
+  $("#checker").style.background=s.dataset.c;
 });
 $("#btnBgUpload").onclick=()=>toast("Background upload"+MOCK);
 $$("[data-sh]").forEach(r=>r.onclick=()=>{
   $$("[data-sh]").forEach(x=>x.classList.toggle("on",x===r));
-  $("#shadowCtrls").classList.toggle("hidden",r.dataset.sh!=="on"); pushHist("shadow");
+  $("#shadowCtrls").classList.toggle("hidden",r.dataset.sh!=="on");
 });
 $("#btnShowMask").onclick=()=>setCompare("mask");
 $("#btnShowOrig").onclick=()=>setCompare("before");
@@ -1027,8 +1032,10 @@ $("#btnSubReset").onclick=()=>{$("#subScale").value=100;$("#subRot").value=0;upd
 /* sliders */
 function bindSlider(id,vid,fmt){
   const el=$("#"+id);
+  // Label only. History for the finishing sliders is committed by main.ts
+  // (bindFxSlider), which knows the pre-gesture value and coalesces a whole
+  // drag into one entry.
   el.oninput=()=>{$("#"+vid).textContent=fmt(el.value);};
-  el.onchange=()=>pushHist(id);
 }
 bindSlider("brushSize","brushSizeV",v=>v+"px");
 bindSlider("brushSoft","brushSoftV",v=>v+"%");
@@ -1100,7 +1107,10 @@ document.addEventListener("keydown",e=>{if(e.code==="Space"&&$("#view-editor").c
 document.addEventListener("keyup",e=>{if(e.code==="Space")spaceDown=false;});
 
 /* compare modes */
-let compareMode="after";
+/* `var`, not `let`: src/main.ts must be able to mirror the real mode here so
+   the `B` shortcut can toggle both ways. A script-scoped `let` is not a
+   property of globalThis and is invisible (and unassignable) from a module. */
+var compareMode="after";
 function setCompare(m){
   compareMode=m;
   $$(".seg button").forEach(b=>b.classList.toggle("on",b.dataset.view===m));
@@ -1136,7 +1146,6 @@ function paintDot(e){
   const g=pctx.createRadialGradient(x,y,s*(1-soft)*.5,x,y,s);
   g.addColorStop(0,`rgba(${brushColor()},.5)`);g.addColorStop(1,`rgba(${brushColor()},0)`);
   pctx.fillStyle=g;pctx.beginPath();pctx.arc(x,y,s,0,7);pctx.fill();
-  pushHist("stroke");
 }
 function paintMove(e){/* stroke coalescing is engine-side; mock logs per stroke */}
 function moveRing(e){
@@ -1172,23 +1181,14 @@ document.addEventListener("click",e=>{if(!localPop.contains(e.target))localPop.c
 $("#fbFine").onclick=()=>{$("#fb").classList.remove("on");toast("Thanks — kept locally");};
 $("#fbFix").onclick=()=>{$("#fb").classList.remove("on");setTool("refine");toast("Refine tools ready");};
 
-/* export drawer */
+/* export drawer — open/close only.
+   Format buttons, the background choice, the JPEG-transparency guard and the
+   export itself are all owned by src/main.ts (wireExportDrawer / realExport).
+   This shell used to toggle #jpegWarn on format click while main.ts toggled it
+   on background kind, so the warning described neither choice reliably. */
 const expWrap=$("#exportWrap");
 $("#btnExport").onclick=()=>expWrap.classList.add("on");
 $$("[data-close-export]").forEach(b=>b.onclick=()=>expWrap.classList.remove("on"));
-$$(".fmt").forEach(b=>b.onclick=()=>{
-  $$(".fmt").forEach(x=>x.classList.toggle("on",x===b));
-  $("#btnDoExport").textContent="Export "+b.dataset.fmt;
-  $("#jpegWarn").classList.toggle("hidden",!(b.dataset.fmt==="JPEG"));
-  if(b.dataset.fmt==="JPEG")toast("JPEG needs a background — pick one");
-});
-function runExport(){
-  const w=$("#expProgWrap"),bar=$("#expBar");
-  w.classList.remove("hidden");let v=0;
-  const t=setInterval(()=>{v=Math.min(100,v+8+Math.random()*10);bar.style.width=v+"%";
-    if(v>=100){clearInterval(t);$("#expNote").textContent="Done: rmbg-export.png · 4032 × 3024 · 4.2 MB (mock)";toast("Export complete");pushHist("export");}},160);
-}
-$("#btnDoExport").onclick=runExport;
 
 /* batch (mock tiles) */
 const batchStates=[["ok","✓"],["ok","✓"],["run","62%"],["run","31%"],["wait","queued"],["wait","queued"],["wait","queued"],["err","failed"],["ok","✓"],["ok","✓"],["wait","queued"],["wait","queued"]];

@@ -1,6 +1,6 @@
-import type { AlphaMask, BBox } from './types.js';
+import type { AlphaMask, BBox, BrushStroke } from './types.js';
 import { clampBox } from './mask.js';
-import { restoreRegion, snapshotRegion } from './ops.js';
+import { applyBrushStroke, restoreRegion, snapshotRegion } from './ops.js';
 
 /**
  * Operation-based history. Entries are closures, so mask patches and
@@ -25,6 +25,15 @@ export class OpLog {
   /** Generic entry (parameter snapshots, etc.). */
   commit(label: string, undo: () => void, redo: () => void): void {
     this.push({ label, undo, redo });
+  }
+
+  /** Paint one brush stroke into the mask as a single undo step. Strokes with
+   *  no points are ignored rather than recorded as a no-op entry. */
+  applyBrush(
+    mask: AlphaMask, stroke: BrushStroke, mode: 'erase' | 'restore', label: string = mode,
+  ): void {
+    if (stroke.points.length === 0) return;
+    this.commitRegion(mask, label, (m) => applyBrushStroke(m, stroke, mode));
   }
 
   /** Run `mut` against the mask and record the changed region for undo. */

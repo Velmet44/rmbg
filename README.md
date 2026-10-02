@@ -40,7 +40,7 @@ and [benchmarks/GATE.md](benchmarks/GATE.md) for measured gate evidence.
 
 - Segmentation: BiRefNet-lite 512px ONNX (MIT), via Transformers.js — WebGPU fp16, WASM fallback
 - Masks are float alpha (hair and semi-transparency survive); the original pixels are never mutated
-- One swappable `SegmentationAdapter`; the engine is pure TypeScript with 29 unit tests
+- One swappable `SegmentationAdapter`; the engine is pure TypeScript with 35 unit tests
 - No backend, no analytics, no tracking — static hosting only ([ARCHITECTURE](SPEC.md#4-engine-architecture))
 
 Model provenance (revisions, licenses, checksums): [models/manifest.json](models/manifest.json).
@@ -51,7 +51,7 @@ Requires Node.js 20+.
 
 ```sh
 npm install
-npm test --workspace @rmbg/engine   # 29 unit tests, DOM-free
+npm test --workspace @rmbg/engine   # 35 unit tests, DOM-free
 cd packages/app && npx vite         # dev server
 ./serve.bat                         # build + serve production (localhost:8901)
 npm run measure --workspace @rmbg/harness -- --model=studioludens/birefnet-lite-512 --device=webgpu

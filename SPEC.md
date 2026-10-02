@@ -108,7 +108,7 @@ Export is a compact settings step, not just a download link:
 
 - Format: PNG (primary, preserves transparency), WebP, JPEG, AVIF where the runtime supports encoding.
 - Resolution: Original (default, dimensions shown, e.g. `4032 × 3024`) or Custom.
-- Background: Transparent or current background.
+- Background: Transparent or Current background. `Current` means whatever the Background panel set, so the file matches what is on screen; `Transparent` forces the cutout only, for this export, without touching the stored background. The drawer states which of the two will actually be written.
 - JPEG cannot carry transparency: selecting JPEG with transparency active must force an explicit background choice (white / black / current / custom color). Never silently flatten.
 - Export button labels the exact outcome (e.g. `Export PNG`), shows progress, and reports the written file (format, dimensions, bytes).
 
@@ -235,6 +235,10 @@ First-run model download is the primary abandonment risk. The following are requ
 - Session reuse: one inference session per tier, reused across images and batch items. Session init cost is paid once and measured separately from per-image latency.
 - Large images: never attempt naive full-resolution neural inference. Required path is working-res inference + full-res mask upsampling, or tiled inference with overlap and edge blending where working-res loses too much detail. Peak memory is bounded and tested at 12 MP, 24 MP, and 50 MP inputs.
 - Batch is sequential. Parallel model executions are forbidden in V1 (memory blowup).
+- Batch admission is bounded by total pixels, not file count: a queued item holds
+  full-res RGB plus a Float32 mask (~7 B/px), and the ZIP export additionally
+  buffers every PNG. Over-budget drops are refused with the running total shown,
+  never silently truncated.
 - Benchmark harness records per-model, per-tier, per-device-class: download bytes, cold/warm latency, peak memory, and mask quality scores on the torture set.
 
 ## 8. Format policy
@@ -256,6 +260,9 @@ Gate rule: **no editor work beyond Stage 1 until the Stage 0 benchmark passes.**
 ## 10. Privacy and security requirements
 
 - Default flow: no account, no image upload, no server-side processing, no analytics, no tracking, no advertising.
+- No third-party network request on page load. The only outbound calls are the
+  model runtime and weights (see §6); the app makes none of its own, and
+  decorative counters that needed an API were removed rather than kept.
 - After model + app assets are cached, the full single-image flow must pass with network disabled (subject to browser limits). This is a release test, not an aspiration.
 - Clipboard, file, and camera inputs are handled in-memory/locally. No image bytes in URLs, logs, or error reports.
 - Optional quality-feedback prompt (`Fine` / `Needs fixing` + reason) is local-only unless the user explicitly opts into sending a diagnostic payload. Any opt-in payload excludes original pixels by default.
@@ -295,6 +302,12 @@ Weights, fixtures, and exports never enter git. Bundle contains code + manifests
 > **Stage 1 DONE** (engine + app verified end-to-end on the giraffe fixture:
 > upload → fast remove → inspect → PNG export at original resolution, fully
 > local). Stages 2–4 not started.
+>
+> Status 2026-09-30: **Stage 3 DONE** (correction tools; evidence in
+> `benchmarks/GATE.md`). Batch queue, custom export resolution and
+> capability-gated AVIF have since landed, so those rows below are
+> out of date — Stage 4 is partially in. See `AGENTS.md` for the
+> current commands.
 
 ### Stage 0 — Model gate and harness ✅ DONE
 
@@ -347,10 +360,10 @@ Weights, fixtures, and exports never enter git. Bundle contains code + manifests
 - [x] Drop → preview → export works first visit and return visit; return visit needs no download. (verified 2026-09-29, giraffe fixture)
 - [x] Original-resolution export byte-checked against source dimensions for PNG/WebP/JPEG. (PNG + JPEG verified: 933 × 1405; WebP path shares the encoder call)
 - [x] JPEG-with-transparency forces explicit background choice; never silently flattens. (white flatten is stated in the export note)
-- [x] Undo/redo covers all op classes; stroke coalescing verified. (AI ops, brush strokes, guided, recompute, effects, background, transform — one interleaved timeline; verified button-state cycle + restore in-app 2026-09-29/30)
+- [x] Undo/redo covers all op classes; stroke coalescing verified. (AI ops, brush strokes, guided, recompute, effects, background, transform — one interleaved timeline; verified button-state cycle + restore in-app 2026-09-29/30. Keyboard slider edits are one undo step per gesture, coalesced across a drag or a key-repeat burst.)
 - [x] Region recompute leaves outside-region alpha bit-identical. (adapter patches bbox + 6px blend band only; commit verified in-app 2026-09-30)
-- [ ] Batch of N completes sequentially with per-item retry; one failure doesn't block the rest.
+- [ ] Batch of N completes sequentially with per-item retry; one failure doesn't block the rest. (queue landed; memory bounded by a pixel budget rather than a file count)
 - [x] Offline-after-cache full flow passes. (return-visit run; full network-off test still to schedule)
-- [x] OOM/decode/download failures show actionable messages with technical expand. (verified: model-start failure screen)
+- [x] OOM/decode/download failures show actionable messages with technical expand. (verified: model-start failure screen; a crashed inference worker now rejects its pending requests instead of spinning forever)
 - [ ] Benchmark torture set re-run on release model revisions; no regression vs gate.
 - [x] `models/manifest.json` complete (name, source, revision, license, checksum) for every shipped artifact; no weights in git. (checksums: lite fp16 + quality fp16)

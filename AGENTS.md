@@ -6,6 +6,11 @@
 - Docs: `README.md`, `SPEC.md`, `CONTRIBUTING.md`, `CONTRIBUTORS.md`, `LICENSE` (MIT).
 - `packages/engine` — pure-TS cutout engine, DOM-free. Test: `npx vitest run` in `packages/engine`.
 - `packages/app` — Vite app (mockup shell + real S1 wiring). Dev: `npx vite` in `packages/app`. Build: `npm run build --workspace @rmbg/app`. Serve built app: untracked `serve.bat` (localhost:8901).
+- Typecheck is a gate: `npm run typecheck --workspace @rmbg/engine` / `--workspace @rmbg/app`.
+  The app `build` runs `tsc --noEmit` first, so a type error fails the deploy.
+  `W = window as Record<string, any>` in `main.ts` defeats this for anything
+  crossing the shell boundary — that is the main reason to keep new logic in
+  `main.ts` and out of the inline shell.
 - `benchmarks/harness` — Stage 0 rig. Measure: `npm run measure --workspace @rmbg/harness -- --model=<id> --device=webgpu|wasm` (needs Playwright CLI session `rmbg`).
 - `models/manifest.json` — model provenance (schema + `LICENSE-AUDIT.md` beside it). Never commit weights, fixtures, or results (see `.gitignore`).
 - No UI framework. Engine must stay DOM-free; app owns canvas/DOM.
@@ -13,6 +18,24 @@
   bundling produced silently broken sessions). One live inference session per
   page: dispose the idle tier on switch (adapter has single-flight init +
   dispose-reinit contract, covered by `adapter.test.ts`).
+- The shell in `index.html` is a classic (non-module) inline script whose
+  top-level *function declarations* land on `window`, so `main.ts` overrides
+  them via `W`. Its `let`/`const` do NOT — a module cannot read or assign a
+  script-scoped binding. Anything the two halves must share must be a `var`
+  (e.g. `compareMode`) or moved into `main.ts`.
+- Model identity lives in `packages/app/src/model-config.ts` (imported by both
+  `main.ts` and `infer-worker.ts`) and must match `models/manifest.json`. The
+  weights cache bucket is the engine's `RUNTIME_CACHE_NAME`, which the adapter
+  re-reads from the runtime's own `env.cacheName` after load.
+- `tsc` cannot see inside `index.html`; the inline shell is unchecked. Keep it
+  to presentation/boilerplate only.
+- Full-res composite is expensive (Float32 clone + full-res `putImageData`);
+  `refreshDisplay()` coalesces onto one animation frame. Do not call
+  `renderDisplay()` directly, and do not add full-res work to per-`input`
+  handlers.
+- A crashed worker is latched via `workerDead`; `callWorker` then rejects
+  immediately. Never remove that latch — a terminated worker silently drops
+  `postMessage`, so without it every later request hangs forever.
 
 ## Working agreement
 - Prefer executable sources of truth (`package.json` scripts, `Makefile`, CI workflows) over prose once they exist.

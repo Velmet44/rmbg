@@ -63,4 +63,38 @@ describe('OpLog', () => {
     log.undo();
     expect(m.alpha[0]).toBe(1);
   });
+
+  describe('applyBrush', () => {
+    it('paints and records one undoable step', () => {
+      const m = createMask(32, 32, 1);
+      const log = new OpLog();
+      log.applyBrush(m, { points: [{ x: 16, y: 16 }], size: 12, softness: 0 }, 'erase');
+      expect(m.alpha[16 * 32 + 16]).toBe(0);
+      expect(log.depth).toBe(1);
+      expect(log.undo()).toBe('erase');
+      expect(m.alpha[16 * 32 + 16]).toBe(1);
+      expect(log.redo()).toBe('erase');
+      expect(m.alpha[16 * 32 + 16]).toBe(0);
+    });
+
+    it('uses the caller label and defaults to the mode', () => {
+      const m = createMask(32, 32, 1);
+      const log = new OpLog();
+      log.applyBrush(m, { points: [{ x: 4, y: 4 }], size: 8, softness: 0 }, 'restore', 'restore brush');
+      expect(log.undo()).toBe('restore brush');
+      log.applyBrush(m, { points: [{ x: 8, y: 8 }], size: 8, softness: 0 }, 'erase');
+      expect(log.undo()).toBe('erase');
+    });
+
+    it('records nothing for an empty stroke', () => {
+      // A no-op entry would consume an undo slot and toasts "Undone: erase"
+      // while changing nothing on screen.
+      const m = createMask(16, 16, 1);
+      const log = new OpLog();
+      log.applyBrush(m, { points: [], size: 12, softness: 0 }, 'erase');
+      expect(log.canUndo).toBe(false);
+      expect(log.depth).toBe(0);
+      expect(m.alpha[0]).toBe(1);
+    });
+  });
 });

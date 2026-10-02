@@ -2,17 +2,19 @@ import type {
   AlphaMask, Background, BrushStroke, Effects, ImageRef, QualityTier, SubjectHint,
 } from './types.js';
 import type { SegmentationAdapter } from './types.js';
-import { boxDownsampleRGB, createMask, upsampleAlphaBilinear } from './mask.js';
-import { applyBrushStroke, contractInPlace, featherInPlace } from './ops.js';
+import { boxDownsampleRGB, upsampleAlphaBilinear } from './mask.js';
+import { refineEdges } from './ops.js';
 import { composite as compositePure, type CompositeResult } from './composite.js';
 import { OpLog } from './history.js';
 
 export * from './types.js';
 export { createMask, cloneMask, boxDownsampleRGB, upsampleAlphaBilinear, packRGBA } from './mask.js';
-export { applyBrushStroke, featherInPlace, contractInPlace } from './ops.js';
+export { applyBrushStroke, featherInPlace, contractInPlace, refineEdges } from './ops.js';
 export { composite } from './composite.js';
 export { OpLog } from './history.js';
-export { TransformersAdapter, type TransformersDevice, DEFAULT_RUNTIME_URL } from './transformers-adapter.js';
+export {
+  TransformersAdapter, type TransformersDevice, DEFAULT_RUNTIME_URL, RUNTIME_CACHE_NAME,
+} from './transformers-adapter.js';
 export { transformSubject, invertTransformPoint, isIdentityTransform, IDENTITY_TRANSFORM, type SubjectTransform, type Transformed } from './transform.js';
 export { growRegion, type GrownRegion } from './guided.js';
 
@@ -62,15 +64,11 @@ export function createEngine(adapter: SegmentationAdapter): Engine {
     },
 
     applyBrush(mask, log, stroke, mode) {
-      log.commitRegion(mask, mode === 'erase' ? 'erase' : 'restore', (m) => {
-        const box = applyBrushStroke(m, stroke, mode);
-        return box.w === 0 ? { x: 0, y: 0, w: 0, h: 0 } : box;
-      });
+      log.applyBrush(mask, stroke, mode);
     },
 
     refineEdges(mask, fx) {
-      if (fx.defringe > 0) contractInPlace(mask, fx.defringe);
-      if (fx.feather > 0) featherInPlace(mask, fx.feather);
+      refineEdges(mask, fx);
     },
 
     composite(image, mask, bg, fx) {
