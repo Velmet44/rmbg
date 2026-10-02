@@ -194,9 +194,11 @@
   #scan{position:absolute;inset:0;display:none;z-index:9;pointer-events:none;overflow:hidden;
     border-radius:6px}
   #scan.on{display:block}
-  #scan .veil{position:absolute;inset:0;background:rgba(8,9,11,.2)}
+  /* Strong enough that the canvas clearly reads as sitting UNDER an overlay
+     rather than as a bright photo with a line across it. */
+  #scan .veil{position:absolute;inset:0;background:rgba(7,8,10,.46)}
   #scan .lines{position:absolute;inset:0;pointer-events:none;
-    background:repeating-linear-gradient(180deg,rgba(255,255,255,.03) 0 1px,transparent 1px 4px)}
+    background:repeating-linear-gradient(180deg,rgba(255,255,255,.025) 0 1px,transparent 1px 4px)}
   #scan .beam{position:absolute;top:0;bottom:0;left:0;width:26%;
     background:linear-gradient(90deg,transparent,rgba(52,211,153,.045) 62%,rgba(52,211,153,.09) 100%);
     animation:sweep 2.6s cubic-bezier(.5,0,.5,1) infinite}
@@ -700,7 +702,7 @@
           </div>
           <div class="spacer"></div>
           <span class="hideM" id="dimLbl" style="font-family:var(--mono)">4032 × 3024</span>
-          <button id="localBtn"><span class="dot"></span>Local processing</button>
+          <button id="localBtn"><span class="dot"></span><span id="localBtnText">Local processing</span></button>
         </div>
       </div>
 
@@ -928,6 +930,7 @@
 <div id="localPop">
   <h4>LOCAL PROCESSING</h4>
   <p>Your image is processed on this device. Images are not uploaded to an RMBG server. The AI model was downloaded separately and is stored in this browser's cache.</p>
+  <p id="localBackendLine" style="color:var(--muted)"></p>
 </div>
 
 <div id="fb">

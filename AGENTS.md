@@ -48,6 +48,9 @@
 - The loading card covers download + session build only. Once `ensureReady()`
   resolves, `realStart` hands off to the editor and the canvas overlay takes
   over; failures return to the card via `backToPreparing()`.
+- Never claim GPU from the init-time backend. The adapter can fall back to WASM
+  during `segment()`, so the worker reports `backend` with every mask and the
+  app calls `adoptBackend(res)`. `runningOnGpu()` is the only GPU predicate.
 - The app has ONE editing session (`state`). Anything that replaces it (opening
   a batch item) destroys the mask, the whole `OpLog`, the finishing params and
   the previous preview URL, with no undo. Route it through `confirmAction()`.

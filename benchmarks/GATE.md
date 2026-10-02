@@ -123,6 +123,15 @@ review rounds are green.
 | **Percentages are now real.** The old screen invented them: weights mapped onto the first 60% of the bar "because session build and inference follow", then 3%/5% for the runtime, 50% or 65% for session build, 85% before inference. `setBar(frac \| null)` now shows a percentage only for measured bytes; every other phase is indeterminate (shimmer, no number). | 41 MB of 98 MB → label `42%`, bar `41.8367%` (the true fraction); indeterminate phases show `pct=""` and `shimmer=true` |
 | The `·` separator moved inside `#prepPctWrap` so an indeterminate phase shows only its phase text instead of a dangling `·`. | `prepPctWrap display=none` when indeterminate |
 
+## Backend truthfulness, overlay opacity, reveal timing (2026-10-02)
+
+| Fix | Evidence |
+|---|---|
+| **"GPU" was not a verified claim.** `state.backend` came from the *init* response, but `TransformersAdapter.segment()` can fall back from WebGPU to WASM when execution fails — and the worker reported no backend with the result, so the UI kept saying GPU while inference ran on the processor. The worker now reports `backend` + `gpu` alongside every mask, and the app adopts it (`adoptBackend`) after each segment and region recompute. | GPU case: `Local processing · GPU`. Fallback case (`wasm/fp32-fallback` reported with the result): button corrects to `Local processing · CPU`, popover reads "Running on CPU · wasm/fp32-fallback. This browser could not give us a usable GPU adapter, so inference is on the processor." |
+| The status bar said only "Local processing" — true but useless. It now names the verified device, and the privacy popover gains a `#localBackendLine` that explains a CPU fallback. | `localBtnText` + `localBackendLine`, both driven by `runningOnGpu()` |
+| Overlay veil raised `rgba(8,9,11,.2)` → `rgba(7,8,10,.46)` so the canvas clearly sits *under* the overlay instead of looking like a bright photo with a line across it. Scanlines dimmed `.03` → `.025`. | computed `rgba(7, 8, 10, 0.46)` |
+| Reveal delay cut from a 2 s hold + 1.6 s wipe to a 0.5 s hold + 1.1 s wipe. The 2 s hold read as a second wait after the overlay had already cleared. | measured gap from overlay-clear to first wipe frame: **542 ms** |
+
 ## PENDING (need adequate hardware: real GPU or stronger CPU)
 
 - In-browser cold/warm inference numbers for the quality tier.

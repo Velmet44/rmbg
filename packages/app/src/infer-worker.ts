@@ -45,8 +45,15 @@ self.onmessage = async (e: MessageEvent) => {
         rgb: new Uint8ClampedArray(msg.rgb),
       };
       const mask = await engine.removeBackground(image, { hint: 'auto', tier: 'fast' });
+      // Report the backend THIS call actually used. The adapter can fall back
+      // from WebGPU to WASM mid-segment when execution fails, so the backend
+      // from init time is stale by the time a result exists — and a UI still
+      // claiming "GPU" while running on the CPU is exactly the wrong claim.
       (self as any).postMessage(
-        { id: msg.id, type: 'mask', w: mask.width, h: mask.height, alpha: mask.alpha.buffer },
+        {
+          id: msg.id, type: 'mask', w: mask.width, h: mask.height,
+          alpha: mask.alpha.buffer, backend: adapter.backend, gpu: adapter.gpuDescription,
+        },
         [mask.alpha.buffer],
       );
     } catch (err) {

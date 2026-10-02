@@ -384,6 +384,44 @@ function makeInitProgress() {
   };
 }
 
+/** Is the live session genuinely on a GPU? Derived from the backend the adapter
+ *  reports, which is re-read after every segment because the adapter can fall
+ *  back from WebGPU to WASM when execution fails. Never assert "GPU" from the
+ *  init-time value alone. */
+function runningOnGpu(): boolean {
+  return state.backend.startsWith('webgpu');
+}
+function backendLabel(): string {
+  return runningOnGpu() ? 'GPU' : state.backend.startsWith('wasm') ? 'CPU' : 'unknown';
+}
+
+/** Put the verified backend in the status bar and the privacy popover. */
+function syncBackendUI() {
+  const label = backendLabel();
+  const known = state.backend !== '…' && state.backend !== 'unknown';
+  const text = $('#localBtnText') as HTMLElement | null;
+  if (text) text.textContent = known ? `Local processing · ${label}` : 'Local processing';
+  const btn = $('#localBtn') as HTMLElement | null;
+  btn?.classList.toggle('on', runningOnGpu());
+  const line = $('#localBackendLine') as HTMLElement | null;
+  if (line) {
+    line.textContent = !known
+      ? 'Checking which device this browser can use…'
+      : runningOnGpu()
+        ? `Running on GPU · ${gpuDesc} (${state.backend}).`
+        : `Running on CPU · ${state.backend}. This browser could not give us a usable GPU adapter, so inference is on the processor.`;
+  }
+  const gpu = $('#gpuLine') as HTMLElement | null;
+  if (gpu) gpu.textContent = known ? `Running on ${label} · ${gpuDesc} · ${state.backend}` : '';
+}
+
+/** Adopt the backend the worker reports alongside a result. */
+function adoptBackend(res: any): void {
+  if (typeof res?.backend === 'string' && res.backend) state.backend = res.backend;
+  if (typeof res?.gpu === 'string' && res.gpu) gpuDesc = res.gpu;
+  syncBackendUI();
+}
+
 async function ensureReady(): Promise<void> {
   const tracker = makeInitProgress();
   try {
@@ -392,10 +430,9 @@ async function ensureReady(): Promise<void> {
     gpuDesc = res.gpu ?? 'unknown';
     // Trust the runtime's own cache bucket over our seed.
     if (typeof res.cacheName === 'string' && res.cacheName) cacheName = res.cacheName;
-    const gpu = $('#gpuLine') as HTMLElement | null;
-    if (gpu) gpu.textContent = `GPU: ${res.gpu ?? 'unknown'} → ${state.backend}`;
   } finally {
     tracker.finish();
+    syncBackendUI();
   }
 }
 
@@ -669,6 +706,9 @@ async function segmentCurrent(): Promise<AlphaMask> {
   // the main-thread original intact for compositing).
   const copy = new Uint8ClampedArray(img.rgb);
   const res = await callWorker({ type: 'segment', imageId: img.id, w: img.width, h: img.height, rgb: copy.buffer }, [copy.buffer]);
+  // Adopt the backend this call used: a WebGPU session can fail during
+  // execution and the adapter silently rebuilds on WASM.
+  adoptBackend(res);
   return { width: res.w, height: res.h, alpha: new Float32Array(res.alpha) };
 }
 
@@ -707,14 +747,13 @@ async function realStart(_withDemo: boolean) {
     // something they cannot see.
     handedOff = true;
     stopElapsed();
-    const backendLabel = state.backend.startsWith('webgpu') ? 'GPU'
-      : state.backend.startsWith('wasm') ? 'CPU' : state.backend;
+    const label = backendLabel();
     W.showView('view-editor');
     lastCompare = 'after';
     W.compareMode = 'after';
     // No mask yet, so the editor shows the original — the cutout arrives when
     // the worker returns.
-    startScan(`Removing background on-device (${backendLabel})…`);
+    startScan(`Removing background on-device (${label})…`);
     refreshDisplay();
     const t0 = performance.now();
     try {
@@ -809,11 +848,12 @@ function runReveal() {
   ov.style.display = 'block';
   const finish = () => { if (my === revealToken) ov!.style.display = 'none'; };
   if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) { finish(); return; }
-  // Hold on the original for 2 s so the result lands mentally first, then
-  // wipe slowly (~1.6 s). Cancel-safe via the token.
+  // Brief beat so the cutout is visible before the wipe starts (this used to
+  // hold for 2 s, which felt like a second wait after the overlay cleared),
+  // then wipe over ~1.1 s. Cancel-safe via the token.
   setTimeout(() => {
     if (my !== revealToken) return;
-    const t0 = performance.now(), DUR = 1600;
+    const t0 = performance.now(), DUR = 1100;
     const frame = (t: number) => {
       if (my !== revealToken) return;
       const k = Math.min(1, (t - t0) / DUR);
@@ -824,7 +864,7 @@ function runReveal() {
       else finish();
     };
     requestAnimationFrame(frame);
-  }, 2000);
+  }, 500);
 }
 
 // ---------- progress overlay ----------
@@ -1739,6 +1779,7 @@ async function recomputeApply() {
       mw: state.mask.width, mh: state.mask.height, alpha: maskCopy.buffer,
       bbox: box,
     }, [imgCopy.buffer, maskCopy.buffer]);
+    adoptBackend(res);
     commitMaskSwap('recompute region', { width: res.w, height: res.h, alpha: new Float32Array(res.alpha) });
     recompBox = null;
     (boxEl() as HTMLElement).style.display = 'none';
