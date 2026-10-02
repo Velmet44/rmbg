@@ -27,13 +27,17 @@ export function composite(
   if (fx.shadow.on) {
     shadow = new Float32Array(w * h);
     const dx = Math.round(fx.shadow.dx), dy = Math.round(fx.shadow.dy);
+    // Clamp opacity. It multiplies the shadow layer and then feeds
+    // `1 - s` into `r * (1 - s)`, so >1 goes negative and a NaN opacity
+    // blackens the ENTIRE image (the clamp below does not save that path).
+    const opacity = Math.min(1, Math.max(0, Number.isFinite(fx.shadow.opacity) ? fx.shadow.opacity : 0));
     for (let y = 0; y < h; y++) {
       const sy = y - dy;
       if (sy < 0 || sy >= h) continue;
       for (let x = 0; x < w; x++) {
         const sx = x - dx;
         if (sx < 0 || sx >= w) continue;
-        shadow[y * w + x] = mask.alpha[sy * w + sx] * fx.shadow.opacity;
+        shadow[y * w + x] = Math.min(1, Math.max(0, mask.alpha[sy * w + sx])) * opacity;
       }
     }
     const r = Math.max(0, Math.round(fx.shadow.blur));
@@ -53,10 +57,22 @@ export function composite(
       br = bgRgb[i * 3]; bgc = bgRgb[i * 3 + 1]; bb = bgRgb[i * 3 + 2]; ba = 1;
     }
     // Subject over background.
-    let r = sr * a + br * (1 - a) * ba;
-    let g = sg * a + bgc * (1 - a) * ba;
-    let b = sb * a + bb * (1 - a) * ba;
-    let alpha = bg.kind === 'transparent' ? a : a + ba * (1 - a);
+    //
+    // `rgba` is STRAIGHT (non-premultiplied) alpha — that is what ImageData and
+    // PNG expect, so the transparent case must hand back the untouched source
+    // colour and let alpha carry the coverage. Premultiplying here (sr * a)
+    // darkens every semi-transparent pixel once the canvas/encoder re-associates
+    // it, which is exactly the hair/fur the float-alpha design exists to keep.
+    let r: number, g: number, b: number, alpha: number;
+    if (bg.kind === 'transparent') {
+      r = sr; g = sg; b = sb;
+      alpha = a;
+    } else {
+      r = sr * a + br * (1 - a) * ba;
+      g = sg * a + bgc * (1 - a) * ba;
+      b = sb * a + bb * (1 - a) * ba;
+      alpha = a + ba * (1 - a);
+    }
     if (shadow) {
       // Shadow shows only where the subject is (semi-)transparent.
       const s = shadow[i] * (1 - a);
@@ -102,7 +118,7 @@ export function compositeOverlay(
   const { width: w, height: h } = image;
   const veil = Math.min(1, Math.max(0, opts.veil ?? 0.55));
   const [tr, tg, tb] = opts.tint ?? OVERLAY_TINT;
-  dbgThrottled('composite', `compositeOverlay ${w}×${h} veil=${veil}`, 2000);
+  dbgThrottled('composite', `compositeOverlay ${w}×${h}`, 2000, { veil });
   const rgba = new Uint8ClampedArray(w * h * 4);
   for (let i = 0; i < w * h; i++) {
     const a = Math.min(1, Math.max(0, mask.alpha[i]));

@@ -59,6 +59,12 @@ export function upsampleAlphaBilinear(
   src: Float32Array, sw: number, sh: number, dw: number, dh: number,
 ): Float32Array {
   const out = new Float32Array(dw * dh);
+  // Endpoint-aligned (corner) sampling: index 0 of `src` lands on index 0 of the
+  // destination and the far edge on the far edge. A pixel-CENTRE-aligned variant
+  // ((x+0.5)*fx-0.5) was measured and makes no practical difference here —
+  // (sw-1)/(dw-1) and sw/dw agree to well under a sub-pixel over any real ratio,
+  // and the residual half-pixel edge offset is inherent to quantising a hard
+  // edge onto the 512px inference grid, not to this interpolation.
   const fx = (sw - 1) / Math.max(1, dw - 1);
   const fy = (sh - 1) / Math.max(1, dh - 1);
   for (let y = 0; y < dh; y++) {
@@ -90,6 +96,10 @@ export function cropRGB(img: ImageRef, box: BBox): ImageRef {
 export function pasteAlphaFeathered(
   dst: AlphaMask, patch: AlphaMask, dx: number, dy: number, feather: number,
 ): void {
+  // A patch only reaches k = 1 once it is at least 2*feather+1 across, so a small
+  // recompute box would apply a fraction of the new mask while the app reported
+  // "region recomputed". Cap the feather to what the patch can actually support.
+  const f = Math.max(0, Math.min(feather, Math.floor((Math.min(patch.width, patch.height) - 1) / 2)));
   for (let y = 0; y < patch.height; y++) {
     const ty = dy + y;
     if (ty < 0 || ty >= dst.height) continue;
@@ -97,7 +107,7 @@ export function pasteAlphaFeathered(
       const tx = dx + x;
       if (tx < 0 || tx >= dst.width) continue;
       const ex = Math.min(x, patch.width - 1 - x, y, patch.height - 1 - y);
-      const k = feather <= 0 ? 1 : Math.min(1, (ex + 1) / (feather + 1));
+      const k = f <= 0 ? 1 : Math.min(1, (ex + 1) / (f + 1));
       const i = ty * dst.width + tx;
       const p = patch.alpha[y * patch.width + x];
       dst.alpha[i] = dst.alpha[i] * (1 - k) + p * k;

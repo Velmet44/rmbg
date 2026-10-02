@@ -1,5 +1,5 @@
 import type {
-  AlphaMask, BBox, ImageRef, ModelProgress, SegmentationAdapter, SegmentOpts, SubjectHint,
+  AlphaMask, BBox, ImageRef, ModelProgress, SegmentationAdapter,
 } from './types.js';
 import { clampBox, cropRGB, packRGBA, pasteAlphaFeathered, upsampleAlphaBilinear } from './mask.js';
 import { dbg, dbgTable, dbgWarn, now } from './log.js';
@@ -70,10 +70,17 @@ export class TransformersAdapter implements SegmentationAdapter {
     return load(this.runtimeUrl);
   }
 
+  /** Bumped by every dispose(). `doInit` captures it on entry and checks it
+   *  before publishing a session, so a dispose() that lands while init is still
+   *  awaiting the pipeline cannot be followed by a stale session that a later
+   *  init() would wrongly treat as fresh (it returns early on `if (this.seg)`). */
+  private generation = 0;
+
   async init(progress?: (p: ModelProgress) => void): Promise<void> {
     if (this.seg) return;
     if (!this.initPromise) {
-      this.initPromise = this.doInit(progress).catch((e) => {
+      const gen = this.generation;
+      this.initPromise = this.doInit(gen, progress).catch((e) => {
         // Allow retry after failure; concurrent callers share the rejection.
         this.initPromise = null;
         throw e;
@@ -82,8 +89,10 @@ export class TransformersAdapter implements SegmentationAdapter {
     return this.initPromise;
   }
 
-  private async doInit(progress?: (p: ModelProgress) => void): Promise<void> {
+  private async doInit(gen: number, progress?: (p: ModelProgress) => void): Promise<void> {
     const t0 = now();
+    /** Abandon this init if a dispose() superseded it while we awaited. */
+    const superseded = () => gen !== this.generation;
     dbg(SCOPE, `init() begin · model=${this.modelId} · want=${this.opts.device ?? 'auto'} · runtime=${this.runtimeUrl}`);
     const { pipeline, RawImage, env } = await this.runtime();
     this.RawImageCtor = RawImage;
@@ -130,11 +139,22 @@ export class TransformersAdapter implements SegmentationAdapter {
       const ts = now();
       dbg(SCOPE, `pipeline() attempt ${attempt.device}/${attempt.dtype} …`);
       try {
-        this.seg = await pipeline('image-segmentation', this.modelId, {
+        if (superseded()) throw new Error('dispose() superseded an in-flight init');
+        const seg = await pipeline('image-segmentation', this.modelId, {
           device: attempt.device as any,
           dtype: attempt.dtype as any,
           progress_callback: cb,
         });
+        // A dispose() may have landed while pipeline() was awaited. Publishing
+        // now would hand a session to an adapter that reports backend=null,
+        // and the NEXT init() would return early on `if (this.seg)` believing
+        // it initialised a fresh session when it got the discarded one.
+        if (superseded()) {
+          dbg(SCOPE, 'dispose() landed during pipeline() — discarding this session');
+          await seg?.dispose?.();
+          throw new Error('dispose() superseded an in-flight init');
+        }
+        this.seg = seg;
         this.deviceUsed = `${attempt.device}/${attempt.dtype}`;
         dbg(SCOPE, `pipeline() OK in ${(now() - ts).toFixed(0)}ms · deviceUsed=${this.deviceUsed} · total init ${(now() - t0).toFixed(0)}ms`);
         return;
@@ -149,7 +169,7 @@ export class TransformersAdapter implements SegmentationAdapter {
     );
   }
 
-  async segment(image: ImageRef, _opts: SegmentOpts): Promise<AlphaMask> {
+  async segment(image: ImageRef): Promise<AlphaMask> {
     if (!this.seg) throw new Error('TransformersAdapter: init() first');
     const t0 = now();
     dbg(SCOPE, `segment() start · ${image.width}×${image.height} · backend=${this.deviceUsed} · gpu=${this.gpuDescription}`);
@@ -236,9 +256,7 @@ export class TransformersAdapter implements SegmentationAdapter {
     };
   }
 
-  async recomputeRegion(
-    image: ImageRef, mask: AlphaMask, bbox: BBox, opts: { hint: SubjectHint },
-  ): Promise<AlphaMask> {
+  async recomputeRegion(image: ImageRef, mask: AlphaMask, bbox: BBox): Promise<AlphaMask> {
     // Re-run with surrounding context, then patch only the bbox.
     const t0 = now();
     const pad = Math.round(Math.max(bbox.w, bbox.h) * 0.35);
@@ -248,7 +266,7 @@ export class TransformersAdapter implements SegmentationAdapter {
     );
     dbg(SCOPE, `recomputeRegion · bbox=${bbox.x},${bbox.y} ${bbox.w}×${bbox.h} · pad=${pad} → crop ${ctx.w}×${ctx.h} (${(100 * ctx.w * ctx.h / (image.width * image.height)).toFixed(1)}% of the image)`);
     const crop = cropRGB(image, ctx);
-    const fresh = await this.segment(crop, { hint: opts.hint, tier: 'quality' });
+    const fresh = await this.segment(crop);
     const next: AlphaMask = {
       width: mask.width, height: mask.height, alpha: new Float32Array(mask.alpha),
     };
@@ -310,8 +328,20 @@ export async function probeGPU(): Promise<{ software: boolean; desc: string }> {
   const t0 = now();
   const first = await read();
   if (first && !first.software) return first;
-  // Possible early-load fallback adapter: wait for the GPU process, retry once.
-  dbg(SCOPE, `first probe returned software/no adapter — waiting 3s and retrying once (${(now() - t0).toFixed(0)}ms so far)`);
+  // Retry ONLY when an adapter actually existed and looked like the early-load
+  // fallback (Basic Render Driver / SwiftShader), which is the one race the
+  // comment above describes. `navigator.gpu` being absent, requestAdapter
+  // returning null, or a throw are definitive answers, not races — sleeping 3s
+  // on them charged every CPU-only browser a silent stall during model load,
+  // and again on the device-loss re-init, for nothing.
+  const retryable = first !== null
+    && !first.desc.startsWith('no WebGPU adapter')
+    && first.desc !== 'WebGPU unavailable';
+  if (!retryable) {
+    dbg(SCOPE, `no hardware adapter possible (${first?.desc ?? 'none'}) — no retry delay, going to WASM (${(now() - t0).toFixed(0)}ms)`);
+    return first ?? { software: true, desc: 'WebGPU unavailable' };
+  }
+  dbg(SCOPE, `first probe returned a fallback adapter (${first.desc}) — waiting 3s and retrying once (${(now() - t0).toFixed(0)}ms so far)`);
   await new Promise((r) => setTimeout(r, 3000));
   const second = await read();
   dbg(SCOPE, `second probe: ${second?.desc ?? 'null'} (total ${(now() - t0).toFixed(0)}ms)`);

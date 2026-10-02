@@ -23,10 +23,45 @@ describe('composite', () => {
     const img = img2x2([[255, 0, 0], [0, 255, 0], [0, 0, 255], [255, 255, 255]]);
     const bg: Background = { kind: 'transparent' };
     const out = composite(img, mask2x2([1, 0.5, 0, 1]), bg, effectsOff);
-    expect(out.rgba[3]).toBe(255);
-    expect(out.rgba[7]).toBe(128); // 0.5 * 255, Uint8ClampedArray rounds
+    expect(out.rgba[3]).toBe(255); // pixel 0 alpha (a=1)
+    expect(out.rgba[7]).toBe(128); // pixel 1 ALPHA: 0.5 * 255, Uint8ClampedArray rounds
     expect(out.rgba[11]).toBe(0);
     expect(out.rgba[0]).toBe(255); // red preserved
+  });
+
+  it('transparent passthrough is straight-alpha, never premultiplied', () => {
+    // The rgba sink is straight-alpha (ImageData / PNG). Premultiplying here
+    // would halve the colour of every semi-transparent pixel, so hair and
+    // feathered edges would darken on canvas AND in the exported file.
+    const img = img2x2([[200, 100, 50], [200, 100, 50], [200, 100, 50], [200, 100, 50]]);
+    const bg: Background = { kind: 'transparent' };
+    for (const a of [1, 0.75, 0.5, 0.25, 0]) {
+      const out = composite(img, mask2x2([a, a, a, a]), bg, effectsOff);
+      expect([out.rgba[0], out.rgba[1], out.rgba[2]]).toEqual([200, 100, 50]);
+      expect(out.rgba[3]).toBe(Math.round(a * 255));
+    }
+  });
+
+  it('clamped garbage alpha cannot produce NaN or out-of-range output', () => {
+    const img = img2x2([[10, 20, 30], [10, 20, 30], [10, 20, 30], [10, 20, 30]]);
+    const bad: AlphaMask = { width: 2, height: 2, alpha: new Float32Array([-1, 2, NaN, Infinity]) };
+    const out = composite(img, bad, { kind: 'transparent' }, effectsOff);
+    for (let i = 0; i < out.rgba.length; i++) {
+      expect(Number.isFinite(out.rgba[i])).toBe(true);
+      expect(out.rgba[i]).toBeGreaterThanOrEqual(0);
+      expect(out.rgba[i]).toBeLessThanOrEqual(255);
+    }
+  });
+
+  it('never mutates its inputs', () => {
+    const img = img2x2([[200, 100, 50], [200, 100, 50], [200, 100, 50], [200, 100, 50]]);
+    const rgbBefore = Array.from(img.rgb);
+    const m = mask2x2([1, 0.5, 0.25, 1]);
+    const alphaBefore = Array.from(m.alpha);
+    const fx: Effects = { ...effectsOff, shadow: { on: true, opacity: 0.5, blur: 2, dx: 1, dy: 1 } };
+    composite(img, m, { kind: 'color', color: [10, 20, 30] }, fx);
+    expect(Array.from(img.rgb)).toEqual(rgbBefore);
+    expect(Array.from(m.alpha)).toEqual(alphaBefore);
   });
 
   it('solid color flattens half-alpha correctly', () => {

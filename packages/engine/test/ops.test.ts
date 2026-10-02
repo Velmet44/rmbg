@@ -59,6 +59,47 @@ describe('brush ops', () => {
     expect(m.alpha[10 * 20 + 12]).toBeLessThan(1);
   });
 
+  it('contractInPlace is separable and border-clamped, not a cumulative min', () => {
+    // The separable rewrite must be bit-identical to the naive 2-D box
+    // minimum. This fixture is chosen to catch the border bug: a left-hand
+    // foreground with a feathered edge. If the x<r clamp is folded into a
+    // precomputed lower bound, the window becomes [0, x+r] — a cumulative
+    // minimum — which flattens the whole left side and erases the fringe.
+    const m = createMask(23, 19, 0);
+    for (let y = 0; y < 19; y++) for (let x = 12; x < 23; x++) m.alpha[y * 23 + x] = 1;
+    featherInPlace(m, 1);
+    const before = Float32Array.from(m.alpha);
+
+    // Reference: naive 2-D box minimum with replicate-clamped bounds.
+    const w = 23, h = 19, r = 4;
+    const ref = new Float32Array(before);
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        let mn = 1;
+        const y0 = Math.max(0, y - r), y1 = Math.min(h - 1, y + r);
+        const x0 = Math.max(0, x - r), x1 = Math.min(w - 1, x + r);
+        for (let yy = y0; yy <= y1; yy++) for (let xx = x0; xx <= x1; xx++) {
+          const v = before[yy * w + xx];
+          if (v < mn) mn = v;
+        }
+        ref[y * w + x] = mn;
+      }
+    }
+
+    contractInPlace(m, r);
+    expect(Array.from(m.alpha)).toEqual(Array.from(ref));
+    // And the fringe must actually have moved inward at the edge.
+    expect(m.alpha[9 * 23 + 12]).toBeLessThan(before[9 * 23 + 12]);
+  });
+
+  it('contractInPlace is a no-op at zero or negative radius', () => {
+    const m = createMask(8, 8, 0.5);
+    const snap = Float32Array.from(m.alpha);
+    contractInPlace(m, 0);
+    contractInPlace(m, -3);
+    expect(Array.from(m.alpha)).toEqual(Array.from(snap));
+  });
+
   it('refineEdges contracts before it feathers', () => {
     // Order matters: feathering first would soften the fringe and then
     // contract would pull the already-spread edge back in, netting a different

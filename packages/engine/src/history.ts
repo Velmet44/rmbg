@@ -12,16 +12,32 @@ export interface LogEntry {
   label: string;
   undo(): void;
   redo(): void;
+  /** Approximate bytes this entry retains for its snapshots, so the stack can
+   *  be bounded by MEMORY as well as by depth. Cheap param-only entries pass 0. */
+  bytes?: number;
 }
+
+/** Retained-bytes ceiling for the undo stack. Each full-res mask snapshot is
+ *  w*h*4 bytes, so an entry-count-only cap retains gigabytes on a large image
+ *  (40 snapshots at 4000x3000 is ~3.6 GB) and long sessions OOM the tab. */
+const HISTORY_BYTE_BUDGET = 256 * 1024 * 1024;
+/** Never evict down past this many entries, whatever the byte budget says. */
+const MIN_DEPTH = 3;
 
 export class OpLog {
   private undoStack: LogEntry[] = [];
   private redoStack: LogEntry[] = [];
-  constructor(private maxDepth = 40) {}
+  private redoBytes = 0;
+  /** Approximate retained bytes per stack slot. Entries carry closures over
+   *  snapshot arrays, so this is accounted for by the caller that knows them. */
+  private undoBytes = 0;
+  constructor(private maxDepth = 40, private byteBudget = HISTORY_BYTE_BUDGET) {}
 
   get canUndo(): boolean { return this.undoStack.length > 0; }
   get canRedo(): boolean { return this.redoStack.length > 0; }
   get depth(): number { return this.undoStack.length; }
+  /** Approximate bytes retained by undo + redo snapshots. */
+  get retainedBytes(): number { return this.undoBytes + this.redoBytes; }
 
   /** Generic entry (parameter snapshots, etc.). */
   commit(label: string, undo: () => void, redo: () => void): void {
@@ -72,6 +88,11 @@ export class OpLog {
     // Snapshot lazily: run mutation on a clone-diff via full pre-copy of affected area is
     // impossible before knowing the box, so capture a full pre-copy only for AI-scale ops
     // flagged by a null box. Brush ops return their bbox.
+    // preFull is needed to capture the pre-image of the region BEFORE `mut` runs,
+    // and the box is not known until after. That costs one full-frame Float32
+    // copy per call — pure GC pressure on the region path, where only the box
+    // is retained afterwards. Unavoidable without splitting the mutator into a
+    // dry-run phase, which would change every call site for no correctness gain.
     const preFull = new Float32Array(mask.alpha);
     const box = mut(mask);
     if (box === null || box.w * box.h > mask.width * mask.height * 0.5) {
@@ -79,8 +100,9 @@ export class OpLog {
       const refW = mask.width, refH = mask.height;
       this.push({
         label,
-        undo: () => { this.assertSize(mask, refW, refH); mask.alpha.set(preFull); },
-        redo: () => { this.assertSize(mask, refW, refH); mask.alpha.set(postFull); },
+        undo: () => { this.assertSame(mask, refW, refH); mask.alpha.set(preFull); },
+        redo: () => { this.assertSame(mask, refW, refH); mask.alpha.set(postFull); },
+        bytes: preFull.byteLength + postFull.byteLength,
       });
       return;
     }
@@ -91,6 +113,7 @@ export class OpLog {
       label,
       undo: () => restoreRegion(mask, before.box, before.data),
       redo: () => restoreRegion(mask, after.box, after.data),
+      bytes: before.data.byteLength + after.data.byteLength,
     });
   }
 
@@ -99,7 +122,9 @@ export class OpLog {
     if (!e) return null;
     e.undo();
     this.redoStack.push(e);
-    dbg('history', `undo "${e.label}" · depth=${this.undoStack.length} redo=${this.redoStack.length}`);
+    this.redoBytes += e.bytes ?? 0;
+    this.undoBytes -= e.bytes ?? 0;
+    dbg('history', `undo "${e.label}" · depth=${this.undoStack.length} redo=${this.redoStack.length} retained≈${(this.retainedBytes / 1048576).toFixed(1)}MB`);
     return e.label;
   }
 
@@ -108,14 +133,29 @@ export class OpLog {
     if (!e) return null;
     e.redo();
     this.undoStack.push(e);
-    dbg('history', `redo "${e.label}" · depth=${this.undoStack.length} redo=${this.redoStack.length}`);
+    this.redoBytes -= e.bytes ?? 0;
+    this.undoBytes += e.bytes ?? 0;
+    dbg('history', `redo "${e.label}" · depth=${this.undoStack.length} redo=${this.redoStack.length} retained≈${(this.retainedBytes / 1048576).toFixed(1)}MB`);
     return e.label;
   }
 
   private push(e: LogEntry): void {
     this.undoStack.push(e);
-    if (this.undoStack.length > this.maxDepth) this.undoStack.shift();
+    this.undoBytes += e.bytes ?? 0;
+    // Evict oldest-first until BOTH limits hold. Keep a floor of a few entries
+    // so a single huge image can never make undo unusable outright.
+    while (
+      (this.undoStack.length > this.maxDepth || this.undoBytes > this.byteBudget)
+      && this.undoStack.length > MIN_DEPTH
+    ) {
+      const dropped = this.undoStack.shift();
+      this.undoBytes -= dropped?.bytes ?? 0;
+      if (dropped) {
+        dbg('history', `evicted "${dropped.label}" · depth=${this.undoStack.length} retained≈${(this.undoBytes / 1048576).toFixed(1)}MB`);
+      }
+    }
     this.redoStack = [];
+    this.redoBytes = 0;
   }
 
   private regionOf(full: Float32Array, w: number, b: BBox): Float32Array {
@@ -126,9 +166,21 @@ export class OpLog {
     return data;
   }
 
-  private assertSize(m: AlphaMask, w: number, h: number): void {
+  /** Guard the assumption every region/full snapshot rests on: undo is writing
+   *  back into the SAME mask object at the SAME size.
+   *
+   *  A size check alone cannot catch the dangerous case, which is a *different
+   *  mask object of identical dimensions* (what `replaceMask` produces). Then
+   *  undo writes into an orphaned mask, the label still reports success, and
+   *  nothing on screen changes. Callers that swap the canonical mask must
+   *  therefore route those swaps through `replaceMask`, which owns holder
+   *  identity itself. */
+  private assertSame(m: AlphaMask, w: number, h: number): void {
     if (m.width !== w || m.height !== h) {
       throw new Error(`OpLog: mask size changed (${m.width}x${m.height} vs ${w}x${h})`);
+    }
+    if (m.alpha.length !== w * h) {
+      throw new Error(`OpLog: mask alpha length ${m.alpha.length} does not match ${w}x${h}`);
     }
   }
 }

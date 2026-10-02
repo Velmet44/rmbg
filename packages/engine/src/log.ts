@@ -29,14 +29,26 @@ export function setLogEnabled(on: boolean): void { overrides.value = on; }
 /** Milliseconds since this module loaded. */
 export function now(): number { return clock() - started; }
 
+/** localStorage is read on EVERY log call (including inside per-frame
+ *  throttled call sites), so cache it and invalidate only via setLogEnabled. */
+let storageMute: boolean | null = null;
+
 function muted(): boolean {
   if (overrides.value !== undefined) return !overrides.value;
-  try {
-    return typeof localStorage !== 'undefined'
-      && localStorage.getItem('rmbg-debug') === 'off';
-  } catch {
-    return false; // private mode / no storage → log
+  // Documented escape hatch: `window.__rmbgDebug = false` (or true) must work.
+  // It previously did nothing at all, because nothing ever read the global —
+  // leaving per-frame floods unmuteable short of a rebuild.
+  const g = (globalThis as { __rmbgDebug?: unknown }).__rmbgDebug;
+  if (typeof g === 'boolean') return !g;
+  if (storageMute === null) {
+    try {
+      storageMute = typeof localStorage !== 'undefined'
+        && localStorage.getItem('rmbg-debug') === 'off';
+    } catch {
+      storageMute = false; // private mode / no storage → log
+    }
   }
+  return storageMute;
 }
 
 function stamp(): string {
@@ -71,9 +83,23 @@ export function dbgTable(scope: string, msg: string, rows: Record<string, unknow
 const lastAt = new Map<string, number>();
 const swallowed = new Map<string, number>();
 
+/** Throttle channels are distinct by the SHAPE of their data, not its values:
+ *  all numbers share a channel, each string a channel of its own. Bounded by
+ *  construction, and stable for the varying payloads that actually stream. */
+function throttleKeyOf(data: unknown): string {
+  if (data === undefined) return '';
+  if (typeof data === 'number') return '#';
+  if (Array.isArray(data)) return `a${data.length}`;
+  return 'o';
+}
+
 export function dbgThrottled(scope: string, msg: string, everyMs = 1000, data?: unknown): void {
   if (muted()) return;
-  const key = `${scope}|${msg}`;
+  // Key on a STABLE channel, never on `msg`. A message built from live values
+  // (a percentage, a byte count) is a new key on every call, so the throttle
+  // never fires AND both maps grow without bound — one permanent entry per
+  // progress event. Callers with varying content pass it as `data` instead.
+  const key = `${scope}|${throttleKeyOf(data)}`;
   const t = clock();
   const last = lastAt.get(key);
   if (last !== undefined && t - last < everyMs) {

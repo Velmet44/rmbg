@@ -51,7 +51,7 @@ describe('TransformersAdapter lifecycle', () => {
     expect(ad.backend).toBeNull();
     await ad.init();
     expect(rt.calls).toEqual(['wasm/fp32', 'wasm/fp32']);
-    const mask = await ad.segment(img(), { hint: 'auto', tier: 'fast' });
+    const mask = await ad.segment(img());
     expect(mask.width).toBe(16);
     expect(mask.alpha[0]).toBeCloseTo(200 / 255, 5);
   });
@@ -61,7 +61,7 @@ describe('TransformersAdapter lifecycle', () => {
     const ad = new TransformersAdapter('m', { device: 'auto', loadRuntime: rt.loadRuntime });
     await ad.init();
     expect(ad.backend).toBe('wasm/fp32');
-    const mask = await ad.segment(img(), { hint: 'auto', tier: 'fast' });
+    const mask = await ad.segment(img());
     expect(mask.width).toBe(16);
   });
 
@@ -80,7 +80,7 @@ describe('TransformersAdapter lifecycle', () => {
     });
     const ad = new TransformersAdapter('m', { device: 'webgpu', loadRuntime });
     await ad.init();
-    const mask = await ad.segment(img(), { hint: 'auto', tier: 'fast' });
+    const mask = await ad.segment(img());
     expect(ad.backend).toBe('webgpu/fp16');
     expect(mask.alpha[0]).toBeCloseTo(200 / 255, 5);
     void rt;

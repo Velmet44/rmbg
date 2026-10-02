@@ -44,12 +44,15 @@ export interface ModelProgress {
   total?: number;
 }
 
-export interface SegmentOpts { hint: SubjectHint; tier: QualityTier; }
-
 export interface SegmentationAdapter {
   readonly modelId: string;
   init(progress?: (p: ModelProgress) => void): Promise<void>;
-  segment(image: ImageRef, opts: SegmentOpts): Promise<AlphaMask>;
-  recomputeRegion(image: ImageRef, mask: AlphaMask, bbox: BBox, opts: { hint: SubjectHint }): Promise<AlphaMask>;
+  /** Segment one image. No hint or tier: V1 ships exactly one model at exactly
+   *  one working resolution, so both parameters used to be accepted here and
+   *  then discarded by the implementation. A control that promises to bias the
+   *  model and does not is worse than no control; they return with the second
+   *  gated model. */
+  segment(image: ImageRef): Promise<AlphaMask>;
+  recomputeRegion(image: ImageRef, mask: AlphaMask, bbox: BBox): Promise<AlphaMask>;
   dispose(): Promise<void>;
 }
