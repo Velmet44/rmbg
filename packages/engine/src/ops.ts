@@ -1,5 +1,6 @@
 import type { AlphaMask, BBox, BrushStroke, Effects } from './types.js';
 import { clampBox } from './mask.js';
+import { dbg } from './log.js';
 
 /** Paint one soft stamp. target 0 = erase, 1 = restore. Returns affected bbox. */
 function stamp(
@@ -109,8 +110,10 @@ export function contractInPlace(m: AlphaMask, px: number): void {
  *  caller owns whether it runs on the canonical mask or on a presentation
  *  copy; the engine only owns the math. */
 export function refineEdges(m: AlphaMask, fx: Pick<Effects, 'feather' | 'defringe'>): void {
+  const t0 = Date.now();
   if (fx.defringe > 0) contractInPlace(m, fx.defringe);
   if (fx.feather > 0) featherInPlace(m, fx.feather);
+  dbg('ops', `refineEdges on ${m.width}×${m.height} feather=${fx.feather} defringe=${fx.defringe} · ${Date.now() - t0}ms`);
 }
 
 export function snapshotRegion(m: AlphaMask, b: BBox): { box: BBox; data: Float32Array } {

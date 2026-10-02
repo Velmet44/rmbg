@@ -1,4 +1,5 @@
 import type { AlphaMask, ImageRef } from './types.js';
+import { dbg } from './log.js';
 
 export interface SubjectTransform {
   /** Uniform scale about the image center. 1 = identity. */
@@ -28,6 +29,8 @@ export interface Transformed {
  * caller composites the result over the background.
  */
 export function transformSubject(image: ImageRef, mask: AlphaMask, t: SubjectTransform): Transformed {
+  const t0 = Date.now();
+  dbg('transform', `transformSubject ${image.width}×${image.height} scale=${t.scale} rot=${t.rotation}° dx=${t.dx} dy=${t.dy}`);
   const { width: w, height: h } = image;
   if (image.width !== mask.width || image.height !== mask.height) {
     throw new Error('transformSubject: image and mask sizes differ');
@@ -60,6 +63,7 @@ export function transformSubject(image: ImageRef, mask: AlphaMask, t: SubjectTra
       alpha[i] = mask.alpha[m00] * w00 + mask.alpha[m10] * w10 + mask.alpha[m01] * w01 + mask.alpha[m11] * w11;
     }
   }
+  dbg('transform', `transformSubject finished in ${Date.now() - t0}ms`);
   return {
     image: { id: image.id + '#warped', width: w, height: h, rgb },
     mask: { width: w, height: h, alpha },

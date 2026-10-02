@@ -51,6 +51,13 @@
 - Never claim GPU from the init-time backend. The adapter can fall back to WASM
   during `segment()`, so the worker reports `backend` with every mask and the
   app calls `adoptBackend(res)`. `runningOnGpu()` is the only GPU predicate.
+- Logging goes through `packages/engine/src/log.ts` (`dbg`/`dbgTable`/
+  `dbgThrottled`), re-exported from the engine index. ON by default; mute with
+  `window.__rmbgDebug = false` or `localStorage['rmbg-debug']='off'` (checked
+  per call, no reload). The worker gets its OWN module instance, so `[wk]`
+  timestamps are relative to worker start, not to the page — the main thread
+  stamps the round trip in `[worker]`. Use `dbgThrottled` at any per-frame
+  call site (it reports the suppressed count, so the line still shows the rate).
 - The app has ONE editing session (`state`). Anything that replaces it (opening
   a batch item) destroys the mask, the whole `OpLog`, the finishing params and
   the previous preview URL, with no undo. Route it through `confirmAction()`.

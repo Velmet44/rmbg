@@ -1,4 +1,5 @@
 import type { AlphaMask, Background, Effects, ImageRef } from './types.js';
+import { dbgThrottled } from './log.js';
 
 export interface CompositeResult {
   width: number;
@@ -18,6 +19,7 @@ export function composite(
     throw new Error('composite: image and mask sizes differ');
   }
   const { width: w, height: h } = image;
+  dbgThrottled('composite', `composite ${w}×${h} bg=${bg.kind} shadow=${fx.shadow.on} feather=${fx.feather} defringe=${fx.defringe}`, 2000);
   const rgba = new Uint8ClampedArray(w * h * 4);
 
   // Optional drop shadow, computed from alpha, drawn under the subject.
@@ -100,6 +102,7 @@ export function compositeOverlay(
   const { width: w, height: h } = image;
   const veil = Math.min(1, Math.max(0, opts.veil ?? 0.55));
   const [tr, tg, tb] = opts.tint ?? OVERLAY_TINT;
+  dbgThrottled('composite', `compositeOverlay ${w}×${h} veil=${veil}`, 2000);
   const rgba = new Uint8ClampedArray(w * h * 4);
   for (let i = 0; i < w * h; i++) {
     const a = Math.min(1, Math.max(0, mask.alpha[i]));

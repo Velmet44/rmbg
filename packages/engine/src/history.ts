@@ -1,6 +1,7 @@
 import type { AlphaMask, BBox, BrushStroke } from './types.js';
 import { clampBox } from './mask.js';
 import { applyBrushStroke, restoreRegion, snapshotRegion } from './ops.js';
+import { dbg } from './log.js';
 
 /**
  * Operation-based history. Entries are closures, so mask patches and
@@ -24,6 +25,7 @@ export class OpLog {
 
   /** Generic entry (parameter snapshots, etc.). */
   commit(label: string, undo: () => void, redo: () => void): void {
+    dbg('history', `commit "${label}"`);
     this.push({ label, undo, redo });
   }
 
@@ -43,6 +45,7 @@ export class OpLog {
   ): void {
     const prev = holder.mask;
     holder.mask = next;
+    dbg('history', `replaceMask "${label}" · previous ${prev ? `${prev.width}×${prev.height}` : 'none'} → ${next.width}×${next.height}`);
     this.push({
       label,
       undo: () => { holder.mask = prev; onChange?.(); },
@@ -55,12 +58,17 @@ export class OpLog {
   applyBrush(
     mask: AlphaMask, stroke: BrushStroke, mode: 'erase' | 'restore', label: string = mode,
   ): void {
-    if (stroke.points.length === 0) return;
+    if (stroke.points.length === 0) {
+      dbg('history', 'applyBrush skipped — stroke had no points');
+      return;
+    }
+    dbg('history', `applyBrush ${mode} · ${stroke.points.length} point(s) · size=${stroke.size} softness=${stroke.softness}`);
     this.commitRegion(mask, label, (m) => applyBrushStroke(m, stroke, mode));
   }
 
   /** Run `mut` against the mask and record the changed region for undo. */
   commitRegion(mask: AlphaMask, label: string, mut: (m: AlphaMask) => BBox | null): void {
+    dbg('history', `commitRegion "${label}" on ${mask.width}×${mask.height}`);
     // Snapshot lazily: run mutation on a clone-diff via full pre-copy of affected area is
     // impossible before knowing the box, so capture a full pre-copy only for AI-scale ops
     // flagged by a null box. Brush ops return their bbox.
@@ -91,6 +99,7 @@ export class OpLog {
     if (!e) return null;
     e.undo();
     this.redoStack.push(e);
+    dbg('history', `undo "${e.label}" · depth=${this.undoStack.length} redo=${this.redoStack.length}`);
     return e.label;
   }
 
@@ -99,6 +108,7 @@ export class OpLog {
     if (!e) return null;
     e.redo();
     this.undoStack.push(e);
+    dbg('history', `redo "${e.label}" · depth=${this.undoStack.length} redo=${this.redoStack.length}`);
     return e.label;
   }
 

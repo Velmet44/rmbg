@@ -1,4 +1,5 @@
 import type { BBox, ImageRef } from './types.js';
+import { dbg } from './log.js';
 
 /**
  * Deterministic guided-selection fallback: flood region-grow on image color
@@ -32,6 +33,7 @@ export function growRegion(
   let count = 0;
   const cap = Math.floor(w * h * maxFraction);
   let minX = x0, maxX = x0, minY = y0, maxY = y0;
+  const t0 = Date.now();
   while (stack.length > 0 && count < cap) {
     const i = stack.pop()!;
     const x = i % w, y = (i / w) | 0;
@@ -49,6 +51,7 @@ export function growRegion(
     if (y > 0 && !seen[i - w]) { seen[i - w] = 1; stack.push(i - w); }
     if (y < h - 1 && !seen[i + w]) { seen[i + w] = 1; stack.push(i + w); }
   }
+  dbg('guided', `growRegion seed=(${x0},${y0}) threshold=${threshold} cap=${(100 * maxFraction).toFixed(0)}% → grew ${count}px (${(100 * count / (w * h)).toFixed(1)}% of the image) in ${Date.now() - t0}ms`);
   return {
     box: { x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1 },
     alpha, width: w, height: h,

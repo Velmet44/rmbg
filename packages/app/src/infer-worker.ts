@@ -2,8 +2,13 @@
 // the main thread stays responsive (progress, zoom/pan, cancel-safe).
 // No DOM in this file: engine + adapter only. Everything stays on-device;
 // the worker fetches model bytes into the same browser cache as the page.
-import { TransformersAdapter, createEngine, type ImageRef } from '@rmbg/engine';
+import { TransformersAdapter, createEngine, dbg, dbgTable, now, type ImageRef } from '@rmbg/engine';
 import { MODEL_ID } from './model-config';
+
+// This module instance has its own clock (the log module is loaded fresh in
+// the worker), so every "+Nms" below is relative to worker start, not to the
+// page. The main thread stamps the round trip.
+dbg('wk', `worker module evaluated · model=${MODEL_ID} · base=${location.origin}`);
 
 const adapter = new TransformersAdapter(MODEL_ID, { device: 'auto' });
 const engine = createEngine(adapter);
@@ -11,7 +16,9 @@ let busy = false;
 
 self.onmessage = async (e: MessageEvent) => {
   const msg = e.data;
+  dbg('wk', `recv ${msg?.type} id=${msg?.id}${busy ? ' (ALREADY BUSY — will reject)' : ''}`);
   if (msg?.type === 'init') {
+    const t0 = now();
     try {
       // The runtime itself (~MBs of JS/WASM) downloads before any model
       // byte can flow; announce it so this phase is never silent.
@@ -26,17 +33,23 @@ self.onmessage = async (e: MessageEvent) => {
         backend: adapter.backend, gpu: adapter.gpuDescription,
         model: MODEL_ID, cacheName: adapter.cacheName,
       });
+      dbgTable('wk', `init complete in ${(now() - t0).toFixed(0)}ms`, {
+        backend: adapter.backend, gpu: adapter.gpuDescription, cacheName: adapter.cacheName,
+      });
     } catch (err) {
+      dbg('wk', `init FAILED after ${(now() - t0).toFixed(0)}ms`, String(err));
       (self as any).postMessage({ id: msg.id, type: 'error', message: String(err).slice(0, 300) });
     }
     return;
   }
   if (msg?.type === 'segment') {
     if (busy) {
+      dbg('wk', `segment rejected — busy`);
       (self as any).postMessage({ id: msg.id, type: 'error', message: 'busy' });
       return;
     }
     busy = true;
+    const t0 = now();
     try {
       const image: ImageRef = {
         id: msg.imageId,
@@ -56,7 +69,12 @@ self.onmessage = async (e: MessageEvent) => {
         },
         [mask.alpha.buffer],
       );
+      dbgTable('wk', `segment done in ${(now() - t0).toFixed(0)}ms`, {
+        in: `${msg.w}×${msg.h}`, out: `${mask.width}×${mask.height}`,
+        backend: adapter.backend, gpu: adapter.gpuDescription,
+      });
     } catch (err) {
+      dbg('wk', `segment FAILED after ${(now() - t0).toFixed(0)}ms`, String(err));
       (self as any).postMessage({ id: msg.id, type: 'error', message: String(err).slice(0, 300) });
     } finally {
       busy = false;
@@ -67,10 +85,12 @@ self.onmessage = async (e: MessageEvent) => {
     // Region recompute: re-run segmentation on bbox+context, patch only that
     // area. Transfers-voxel ownership like segment (copies stay main-side).
     if (busy) {
+      dbg('wk', 'recompute rejected — busy');
       (self as any).postMessage({ id: msg.id, type: 'error', message: 'busy' });
       return;
     }
     busy = true;
+    const t0 = now();
     try {
       const image: ImageRef = {
         id: msg.imageId, width: msg.w, height: msg.h, rgb: new Uint8ClampedArray(msg.rgb),
@@ -80,10 +100,15 @@ self.onmessage = async (e: MessageEvent) => {
       };
       const next = await adapter.recomputeRegion(image, mask, msg.bbox, { hint: 'auto' });
       (self as any).postMessage(
-        { id: msg.id, type: 'mask', w: next.width, h: next.height, alpha: next.alpha.buffer },
+        {
+          id: msg.id, type: 'mask', w: next.width, h: next.height,
+          alpha: next.alpha.buffer, backend: adapter.backend, gpu: adapter.gpuDescription,
+        },
         [next.alpha.buffer],
       );
+      dbg('wk', `recompute done in ${(now() - t0).toFixed(0)}ms · bbox=${msg.bbox?.x},${msg.bbox?.y} ${msg.bbox?.w}×${msg.bbox?.h}`);
     } catch (err) {
+      dbg('wk', `recompute FAILED after ${(now() - t0).toFixed(0)}ms`, String(err));
       (self as any).postMessage({ id: msg.id, type: 'error', message: String(err).slice(0, 300) });
     } finally {
       busy = false;

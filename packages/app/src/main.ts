@@ -10,12 +10,17 @@ import {
   RUNTIME_CACHE_NAME,
   boxDownsampleRGB,
   composite,
+  compositeOverlay,
+  dbg,
+  dbgTable,
+  dbgThrottled,
+  dbgWarn as dbgWarnLog,
   growRegion,
   invertTransformPoint,
   isIdentityTransform,
+  now,
   refineEdges,
   transformSubject,
-  compositeOverlay,
   type CompositeResult,
   upsampleAlphaBilinear,
   type AlphaMask,
@@ -28,6 +33,13 @@ import {
   type SubjectTransform,
 } from '@rmbg/engine';
 import { MODEL_ID, MODEL_REV, MODEL_WEIGHTS_RE } from './model-config';
+
+// Mute the log without a rebuild: window.__rmbgDebug = false, or
+// localStorage.setItem('rmbg-debug', 'off').
+(window as unknown as Record<string, unknown>).__rmbgDebug = true;
+/** Page-load reference so total time-to-first-mask is readable off one line. */
+const startedAt = now();
+dbg('boot', `main.ts evaluated · model=${MODEL_ID} rev=${MODEL_REV.slice(0, 8)}`);
 
 const W = window as unknown as Record<string, any>;
 const $ = (s: string) => document.querySelector(s) as HTMLElement;
@@ -114,7 +126,10 @@ function commitFx(label: string, mut: () => void) {
  *  entirely because there is no cutout for them to act on. */
 function derivedView(): { image: ImageRef; mask: AlphaMask } {
   const img = state.image!;
-  if (!removalOn()) return { image: img, mask: opaqueMask(img.width, img.height) };
+  if (!removalOn()) {
+    dbgThrottled('view', 'derivedView → original (removal off), opaque mask passthrough', 1000);
+    return { image: img, mask: opaqueMask(img.width, img.height) };
+  }
   const msk = state.mask!;
   let image = img, mask = msk;
   if (state.bg.kind !== 'transparent' && !isIdentityTransform(state.tr)) {
@@ -133,6 +148,7 @@ function derivedView(): { image: ImageRef; mask: AlphaMask } {
  *  BEFORE the swap. The bookkeeping lives in `OpLog.replaceMask` so it is unit
  *  tested; this only supplies the app's redraw hook. */
 function commitMaskSwap(label: string, next: AlphaMask): AlphaMask {
+  dbg('mask', `commitMaskSwap "${label}" → ${next.width}×${next.height}`);
   state.log.replaceMask(state, label, next, refreshDisplay);
   return next;
 }
@@ -161,9 +177,13 @@ type WorkerProgress = {
   total?: number;
 };
 const pending = new Map<number, Pending>();
+/** When each in-flight request went out, so we can log the round trip. */
+const sentAt = new Map<number, number>();
 worker.onmessage = (e: MessageEvent) => {
   const m = e.data;
   if (m?.type === 'progress') {
+    dbgThrottled('worker', `progress ${m.status} ${m.file}`, 1000,
+      m.total ? { loaded: m.loaded, total: m.total } : undefined);
     // Fan-out, not routing: single-flight init means the pipeline runs once
     // (usually won by the page-load prefetch), but EVERY in-flight caller
     // with a progress listener must see the events — otherwise the visible
@@ -172,10 +192,19 @@ worker.onmessage = (e: MessageEvent) => {
     return;
   }
   const p = pending.get(m?.id);
-  if (!p) return;
-  pending.delete(m.id);
-  if (m?.type === 'error') p.reject(new Error(m.message || 'worker failed'));
-  else p.resolve(m);
+  const round = sentAt.get(m?.id);
+  if (round !== undefined) sentAt.delete(m?.id);
+  if (!p) {
+    dbg('worker', `reply with no pending request · id=${m?.id} type=${m?.type}`);
+    return;
+  }
+  pending.delete(m?.id);
+  dbg('worker', `reply ${m.type} id=${m.id} in ${round === undefined ? '?' : `${(now() - round).toFixed(0)}ms`} · pending left=${pending.size}`,
+    m.type === 'mask' ? { w: m.w, h: m.h, backend: m.backend, gpu: m.gpu } : undefined);
+  if (m?.type === 'error') {
+    dbgWarnLog('worker', `error id=${m.id}: ${m.message}`);
+    p.reject(new Error(m.message || 'worker failed'));
+  } else p.resolve(m);
 };
 /** A crashed worker is terminated, not restarted: every later postMessage is
  *  silently dropped, so each request would hang forever. Latch the failure and
@@ -183,18 +212,22 @@ worker.onmessage = (e: MessageEvent) => {
 let workerDead = false;
 function failAllPending(message: string) {
   workerDead = true;
+  dbgWarnLog('worker', `failing ${pending.size} pending request(s): ${message}`);
   const err = new Error(message);
   const waiters = [...pending.values()];
   pending.clear();
+  sentAt.clear();
   for (const p of waiters) p.reject(err);
 }
 worker.onerror = (e) => {
   const msg = (e as ErrorEvent).message || 'unknown error';
+  dbgWarnLog('worker', `onerror: ${msg}`);
   stopElapsed();
   failAllPending(`worker crashed: ${msg}`);
   W.toast?.(`Background worker crashed: ${msg.slice(0, 120)} — reload to retry`, true);
 };
 worker.onmessageerror = (e) => {
+  dbgWarnLog('worker', `onmessageerror: ${String(e).slice(0, 200)}`);
   stopElapsed();
   failAllPending(`worker message could not be deserialized: ${String(e).slice(0, 120)}`);
   W.toast?.('Worker communication failed — reload to retry', true);
@@ -207,8 +240,11 @@ function callWorker(
     return Promise.reject(new Error('The inference worker crashed — reload the page to retry'));
   }
   const id = ++reqId;
+  dbg('worker', `→ ${msg.type} id=${id} · pending will be ${pending.size + 1}`,
+    msg.type === 'segment' ? { w: msg.w, h: msg.h } : msg.type === 'recompute' ? { bbox: msg.bbox } : undefined);
   return new Promise((resolve, reject) => {
     pending.set(id, { resolve, reject, onProgress });
+    sentAt.set(id, now());
     worker.postMessage({ ...msg, id }, transfer ?? []);
   });
 }
@@ -232,6 +268,8 @@ function setBar(frac: number | null, mbText: string, totalText?: string) {
   const bar = $('#prepBar') as HTMLElement;
   const track = bar.parentElement as HTMLElement | null;
   const determinate = frac !== null;
+  dbgThrottled('prep', `setBar ${determinate ? `${(frac! * 100).toFixed(1)}%` : 'indeterminate'} · "${mbText}"`, 1000,
+    totalText !== undefined ? { total: totalText } : undefined);
   if (determinate) {
     const pct = Math.min(100, Math.max(0, frac! * 100));
     bar.style.width = `${pct}%`;
@@ -271,8 +309,14 @@ async function isModelCached(): Promise<boolean> {
   try {
     const cache = await caches.open(cacheName);
     const keys = await cache.keys();
-    return keys.some((r) => MODEL_WEIGHTS_RE.test(r.url));
+    const hit = keys.some((r) => MODEL_WEIGHTS_RE.test(r.url));
+    dbgTable('model', `cache check on "${cacheName}"`, {
+      entries: keys.length, weightsPresent: hit,
+      urls: keys.map((r) => r.url.split('/').pop() ?? r.url).slice(0, 12),
+    });
+    return hit;
   } catch {
+    dbgWarnLog('model', `cache check threw on "${cacheName}" — assuming a miss`);
     return false; // Cache API unavailable (private mode etc.) → assume miss
   }
 }
@@ -283,6 +327,7 @@ async function isModelCached(): Promise<boolean> {
 let elapsedTimer: number | null = null;
 function startElapsed(label: string) {
   stopElapsed();
+  dbg('prep', `startElapsed "${label}"`);
   const t0 = Date.now();
   const el = $('#prepElapsed') as HTMLElement | null;
   const tick = () => {
@@ -351,6 +396,8 @@ function makeInitProgress() {
     onEvent(p: WorkerProgress) {
       if (finished) return;
       lastEventAt = Date.now();
+      dbgThrottled('model', `event ${p.status} ${p.file}`, 1000,
+        p.status === 'progress' ? { loaded: p.loaded, total: p.total } : undefined);
       if (p.status !== 'done' && buildTimer !== null) { clearTimeout(buildTimer); buildTimer = null; }
       if (p.status === 'runtime') {
         // The runtime is a dynamic import(): no byte events are observable, so
@@ -424,12 +471,16 @@ function adoptBackend(res: any): void {
 
 async function ensureReady(): Promise<void> {
   const tracker = makeInitProgress();
+  dbg('model', 'ensureReady()');
   try {
     const res = await callWorker({ type: 'init' }, undefined, (p) => tracker.onEvent(p));
     state.backend = res.backend ?? 'unknown';
     gpuDesc = res.gpu ?? 'unknown';
     // Trust the runtime's own cache bucket over our seed.
     if (typeof res.cacheName === 'string' && res.cacheName) cacheName = res.cacheName;
+    dbgTable('model', `session ready · ${backendLabel()}`, {
+      backend: state.backend, gpu: gpuDesc, cacheName, model: res.model,
+    });
   } finally {
     tracker.finish();
     syncBackendUI();
@@ -437,6 +488,7 @@ async function ensureReady(): Promise<void> {
 }
 
 async function decodeToImageRef(f: File, id: string): Promise<ImageRef> {
+  const t0 = now();
   const bmp = await createImageBitmap(f);
   const canvas = document.createElement('canvas');
   canvas.width = bmp.width; canvas.height = bmp.height;
@@ -448,6 +500,7 @@ async function decodeToImageRef(f: File, id: string): Promise<ImageRef> {
     rgb[i * 3] = data[i * 4]; rgb[i * 3 + 1] = data[i * 4 + 1]; rgb[i * 3 + 2] = data[i * 4 + 2];
   }
   bmp.close();
+  dbg('ingest', `decode "${id}" → ${canvas.width}×${canvas.height} in ${(now() - t0).toFixed(0)}ms`);
   return { id, width: canvas.width, height: canvas.height, rgb };
 }
 
@@ -594,16 +647,23 @@ function drawMaskGray(target: HTMLCanvasElement, mask: AlphaMask) {
  *  per drag and pinned the main thread. Coalescing also removes any re-entrancy
  *  risk against the shared `blit` scratch canvas. */
 let displayRaf: number | null = null;
+let displayCoalesced = 0;
 function refreshDisplay(): void {
-  if (displayRaf !== null) return;
+  if (displayRaf !== null) { displayCoalesced++; return; }
   displayRaf = requestAnimationFrame(() => {
     displayRaf = null;
+    const coalesced = displayCoalesced;
+    displayCoalesced = 0;
     renderDisplay();
+    if (coalesced > 0) dbg('display', `coalesced ${coalesced} request(s) onto one frame`);
   });
 }
 
+let displayFrame = 0;
 function renderDisplay() {
   if (!state.image || !resultCanvas) return;
+  const frame = ++displayFrame;
+  dbgThrottled('display', `render #${frame} mode=${lastCompare} removal=${removalOn()} mask=${state.mask ? `${state.mask.width}×${state.mask.height}` : 'none'}`, 1000);
   syncUndoRedo();
   syncStrokeButtons();
   syncRemoveSwitch();
@@ -672,12 +732,15 @@ function drawOriginal(target: HTMLCanvasElement, img: ImageRef) {
 let prepToken = 0;
 
 async function realLoadFile(f: File) {
+  dbg('ingest', `loadFile "${f.name}" · ${(f.size / 1048576).toFixed(2)} MB · type=${f.type || 'unknown'}`);
   if (!f.type.startsWith('image/')) { W.toast('Not an image file', true); return; }
   // Reset the picker so re-selecting the SAME file still fires change.
   const picker = $('#fileInput') as HTMLInputElement | null;
   if (picker) picker.value = '';
   try {
+    const t0 = now();
     const ref = await decodeToImageRef(f, f.name);
+    dbg('ingest', `decoded in ${(now() - t0).toFixed(0)}ms → ${ref.width}×${ref.height} (${(ref.rgb.length / 3 / 1e6).toFixed(2)} M px)`);
     state.image = ref;
     state.mask = null;
     state.removeBg = false;
@@ -705,7 +768,9 @@ async function segmentCurrent(): Promise<AlphaMask> {
   // Copy: the buffer is transferred to the worker (neutering the copy keeps
   // the main-thread original intact for compositing).
   const copy = new Uint8ClampedArray(img.rgb);
+  const t0 = now();
   const res = await callWorker({ type: 'segment', imageId: img.id, w: img.width, h: img.height, rgb: copy.buffer }, [copy.buffer]);
+  dbg('infer', `segmentCurrent returned ${res.w}×${res.h} in ${(now() - t0).toFixed(0)}ms · backend=${res.backend} gpu=${res.gpu}`);
   // Adopt the backend this call used: a WebGPU session can fail during
   // execution and the adapter silently rebuilds on WASM.
   adoptBackend(res);
@@ -713,6 +778,7 @@ async function segmentCurrent(): Promise<AlphaMask> {
 }
 
 async function realStart(_withDemo: boolean) {
+  dbg('flow', `realStart(withDemo=${_withDemo}) for ${state.image ? `${state.image.width}×${state.image.height}` : 'no image'}`);
   if (!state.image) { W.toast('Pick an image first', true); W.showView('view-landing'); return; }
   const my = ++prepToken;
   W.showView('view-preparing');
@@ -740,6 +806,7 @@ async function realStart(_withDemo: boolean) {
     startElapsed('working');
     // Model load (runtime + weights + session). Indeterminate unless bytes.
     await ensureReady();
+    dbg('flow', `ensureReady done in ${(now() - startedAt).toFixed(0)}ms · backend=${backendLabel()} · gpu=${gpuDesc}`);
     if (my !== prepToken) return; // Back hit mid-init: warm session stays, but show nothing
     // ---- Hand off: everything that can still take a long time (the actual
     // segmentation) belongs on the canvas, not on a loading card. The user sees
@@ -767,6 +834,12 @@ async function realStart(_withDemo: boolean) {
     state.removeBg = true;
     if (my !== prepToken) return; // Back hit mid-inference: discard, don't pop the editor open
     stopScan();
+    dbgTable('flow', 'first cutout complete', {
+      segmentation: `${((performance.now() - t0) / 1000).toFixed(2)}s`,
+      sincePageLoad: `${((now() - startedAt) / 1000).toFixed(2)}s`,
+      backend: state.backend, gpu: gpuDesc,
+      mask: `${state.mask?.width}×${state.mask?.height}`,
+    });
     // The user can leave the editor while this runs (Back is not the preparing
     // screen's cancel button any more), so re-assert the view: a finished
     // result is always shown rather than stranded on a hidden canvas.
@@ -800,6 +873,7 @@ async function realStart(_withDemo: boolean) {
 }
 
 async function rerun() {
+  dbg('flow', 'rerun()');
   if (!state.image) return;
   if (!removalOn()) { W.toast('Turn on “Remove background” first', true); return; }
   if (isScanning()) { noteEditBlocked('Still working — one moment'); return; }
@@ -826,6 +900,7 @@ async function rerun() {
 let revealToken = 0;
 function runReveal() {
   if (!state.image) return;
+  dbg('reveal', 'runReveal — hold then wipe');
   const checker = $('#checker') as HTMLElement;
   let ov = $('#revealUI') as HTMLElement | null;
   if (!ov) {
@@ -877,8 +952,11 @@ function runReveal() {
 // there to prove liveness.
 let scanTimer: number | null = null;
 let scanBusy = false;
+/** When the current scan began, so stopScan can report how long it ran. */
+let scanStart = 0;
 
 function isScanning(): boolean {
+  dbgThrottled('scan', `scanning=${scanBusy}`, 2000);
   return scanBusy;
 }
 
@@ -894,6 +972,7 @@ function ensureScanOverlay() {
 }
 
 function startScan(label: string) {
+  dbg('scan', `startScan "${label}"`);
   ensureScanOverlay();
   const lbl = $('#scanLbl') as HTMLElement | null;
   if (lbl) lbl.textContent = label;
@@ -906,13 +985,18 @@ function startScan(label: string) {
   };
   tick();
   scanBusy = true;
+  scanStart = now();
   ($('#scan') as HTMLElement | null)?.classList.add('on');
   if (scanTimer !== null) clearInterval(scanTimer);
   scanTimer = window.setInterval(tick, 500);
 }
 
 function stopScan() {
-  if (scanTimer !== null) { clearInterval(scanTimer); scanTimer = null; }
+  if (scanTimer !== null) {
+    clearInterval(scanTimer);
+    dbg('scan', `stopScan after ${(now() - scanStart).toFixed(0)}ms`);
+  }
+  scanTimer = null;
   scanBusy = false;
   ($('#scan') as HTMLElement | null)?.classList.remove('on');
   const time = $('#scanTime') as HTMLElement | null;
@@ -944,6 +1028,7 @@ function guardSplit(): boolean {
 }
 
 function realCompare(m: string) {
+  dbg('compare', `realCompare "${m}"`);
   revealToken++;
   lastCompare = m;
   // Mirror into the shell's compareMode: the `B` shortcut there reads its own
@@ -1011,6 +1096,7 @@ function syncRemoveSwitch() {
 
 /** Turn removal on/off as one undo step, then reconcile the view. */
 function setRemoval(next: boolean, opts: { silent?: boolean } = {}) {
+  dbg('removal', `setRemoval(${next}) — mask stays ${state.mask ? 'in place' : 'absent'}`);
   if (next === state.removeBg) { syncRemoveSwitch(); return; }
   const prev = state.removeBg;
   state.removeBg = next;
@@ -1026,6 +1112,7 @@ function setRemoval(next: boolean, opts: { silent?: boolean } = {}) {
 }
 
 function afterRemovalChange() {
+  dbg('removal', `afterRemovalChange · removalOn=${removalOn()} · compare was "${lastCompare}"`);
   // Turning removal off from a cutout view lands on Original; turning it back
   // on returns to the cutout the user was last looking at.
   if (!state.removeBg && lastCompare !== 'before') {
@@ -1278,14 +1365,18 @@ async function realExport() {
       const pct = Math.round((100 * size.w) / state.image.width);
       note += pct === 100 ? ' · custom size' : pct < 100 ? ` · downscaled to ${pct}%` : ` · upscaled to ${pct}%`;
     }
+    const t0 = now();
     const canvas = exportCanvas(view, bg, fxUsed, size.w, size.h);
+    dbg('export', `composited ${size.w}×${size.h} in ${(now() - t0).toFixed(0)}ms · cutout=${cutout} bg=${bg.kind}`);
     ($('#expBar') as HTMLElement).style.width = '60%';
     const mime = fmt === 'PNG' ? 'image/png'
       : fmt === 'WebP' ? 'image/webp'
       : fmt === 'AVIF' ? 'image/avif' : 'image/jpeg';
     const quality = fmt === 'AVIF' ? 0.85 : 0.92;
+    const tEnc = now();
     const blob: Blob | null = await new Promise((res) => canvas.toBlob(res, mime, quality));
     if (!blob) throw new Error('encoder returned nothing');
+    dbg('export', `encoded ${fmt} in ${(now() - tEnc).toFixed(0)}ms · ${(blob.size / 1048576).toFixed(2)} MB · total ${(now() - t0).toFixed(0)}ms`);
     ($('#expBar') as HTMLElement).style.width = '100%';
     const ext = fmt === 'PNG' ? 'png' : fmt === 'WebP' ? 'webp' : fmt === 'AVIF' ? 'avif' : 'jpg';
     const a = document.createElement('a');
@@ -1297,6 +1388,7 @@ async function realExport() {
     W.toast('Export complete');
     syncUndoRedo();
   } catch (e) {
+    dbgWarnLog('export', `export failed: ${String(e)}`);
     $('#expNote').textContent = `Export failed: ${String(e).slice(0, 140)} — retry or try PNG.`;
     W.toast('Export failed', true);
   }
@@ -1336,6 +1428,7 @@ function activeBrushMode(): 'erase' | 'restore' {
 
 function syncStrokeButtons() {
   const apply = $('#btnApplyStrokes') as HTMLButtonElement | null;
+  dbgThrottled('paint', `pending strokes=${pendingStrokes.length} brush=${brushActive() ? activeBrushMode() : 'inactive'}`, 1000);
   if (apply) {
     apply.disabled = pendingStrokes.length === 0 || !state.mask;
     apply.textContent = `Apply (${pendingStrokes.length})`;
@@ -1343,6 +1436,7 @@ function syncStrokeButtons() {
 }
 
 function clearOverlay() {
+  if (pendingStrokes.length > 0) dbg('paint', `clearOverlay — discarding ${pendingStrokes.length} unapplied stroke(s)`);
   const paint = $('#paintLayer') as HTMLCanvasElement | null;
   paint?.getContext('2d')?.clearRect(0, 0, paint.width, paint.height);
   pendingStrokes = [];
@@ -1402,6 +1496,7 @@ function installStrokeCapture() {
         state.log.applyBrush(state.mask, stroke, s.mode);
       }
       const n = pendingStrokes.length;
+      dbg('paint', `applied ${n} stroke(s) · scale ${sx.toFixed(2)}×${sy.toFixed(2)} · warped=${warped}`);
       clearOverlay();
       refreshDisplay();
       W.toast(`Applied ${n} stroke${n === 1 ? '' : 's'}`);
@@ -1424,6 +1519,7 @@ function paintSliderLabel(id: string, fmt: (v: number) => string) {
 /** Keep every finishing control visually in sync with state (also after undo). */
 function syncFxControls() {
   if (!state.image) return;
+  dbgThrottled('fx', `syncFxControls · bg=${state.bg.kind} shadow=${state.fx.shadow.on} feather=${state.fx.feather} defringe=${state.fx.defringe} tr=${JSON.stringify(state.tr)}`, 1000);
   $$('#p-effects [data-sh]').forEach((r) => {
     (r as HTMLElement).classList.toggle('on', ((r as HTMLElement).dataset.sh === 'on') === state.fx.shadow.on);
   });
@@ -1729,6 +1825,7 @@ function installRefineCapture() {
         const x = Math.round(Math.min(anchor.x, pt.x)), y = Math.round(Math.min(anchor.y, pt.y));
         const w = Math.round(Math.abs(pt.x - anchor.x)), h = Math.round(Math.abs(pt.y - anchor.y));
         if (w >= 8 && h >= 8 && state.image) {
+          dbg('refine', `recompute box ${w}×${h} at (${x},${y})`);
           recompBox = {
             x: Math.max(0, x), y: Math.max(0, y),
             w: Math.min(state.image.width - Math.max(0, x), w),
@@ -1764,6 +1861,7 @@ function installRefineCapture() {
 }
 
 async function recomputeApply() {
+  dbg('refine', 'recomputeApply()');
   if (!state.image || !state.mask) return;
   if (guardEditing()) return;
   if (!recompBox) { W.toast('Drag a box over the problem area first'); return; }
@@ -1794,6 +1892,7 @@ async function recomputeApply() {
 }
 
 async function guidedApply(x: number, y: number) {
+  dbg('refine', `guidedApply at image coords (${x.toFixed(0)},${y.toFixed(0)})`);
   // Caller already ran guardEditing(); this is belt-and-braces for the batch
   // path, which can reach here with removal switched off.
   if (!removalOn() || lastCompare === 'split') return;
@@ -1834,6 +1933,7 @@ async function guidedApply(x: number, y: number) {
     return touched === 0 ? { x: 0, y: 0, w: 0, h: 0 } : { ...fb };
   });
   if (touched === 0) { W.toast('No clear region there — try another spot'); return; }
+  dbg('refine', `guided ${mode} touched ${touched}px in a ${fb.w}×${fb.h} box at (${fb.x},${fb.y})`);
   refreshDisplay();
   W.toast(`Guided ${mode}: region applied (undoable)`);
 }
@@ -1970,23 +2070,27 @@ function renderBatch() {
 
 /** Strictly sequential: one worker, one inference at a time. */
 async function pumpBatch(): Promise<void> {
-  if (batchPumping) return;
-  if (!batch.some((b) => b.status === 'queued')) return;
+  if (batchPumping) { dbg('batch', 'pumpBatch already running'); return; }
+  const queued = batch.filter((b) => b.status === 'queued');
+  if (queued.length === 0) { dbg('batch', 'pumpBatch — nothing queued'); return; }
+  dbg('batch', `pumpBatch start · ${queued.length} queued of ${batch.length} · ${(batchPixels() / 1e6).toFixed(1)} MP resident`);
   batchPumping = true;
   try {
     $('#batchCount').textContent = 'loading model…';
     try {
       await ensureReady();
     } catch (e) {
+      dbgWarnLog('batch', `model start failed: ${String(e)}`);
       W.toast(`Model start failed: ${String(e).slice(0, 120)}`, true);
       return;
     }
     for (const it of batch) {
       if (it.status !== 'queued') continue;
-      if (!($('#view-batch') as HTMLElement).classList.contains('on')) break; // paused: user left
+      if (!($('#view-batch') as HTMLElement).classList.contains('on')) { dbg('batch', 'paused — user left the batch view'); break; } // paused: user left
       it.status = 'run';
       renderBatch();
       batchBusy = true;
+      const t0 = now();
       try {
         const copy = new Uint8ClampedArray(it.image.rgb);
         const res = await callWorker(
@@ -1996,10 +2100,12 @@ async function pumpBatch(): Promise<void> {
         it.mask = { width: res.w, height: res.h, alpha: new Float32Array(res.alpha) };
         it.status = 'done';
         delete it.err;
+        dbg('batch', `done "${it.name}" in ${(now() - t0).toFixed(0)}ms · ${it.image.width}×${it.image.height} · backend=${res.backend}`);
       } catch (e) {
         // One failure never blocks the rest of the queue.
         it.status = 'err';
         it.err = String(e).slice(0, 140);
+        dbgWarnLog('batch', `failed "${it.name}" after ${(now() - t0).toFixed(0)}ms: ${it.err}`);
       } finally {
         batchBusy = false;
       }
@@ -2008,6 +2114,7 @@ async function pumpBatch(): Promise<void> {
   } finally {
     batchPumping = false;
     batchBusy = false;
+    dbg('batch', `pumpBatch end · done=${batch.filter((b) => b.status === 'done').length} failed=${batch.filter((b) => b.status === 'err').length}`);
     renderBatch();
   }
 }
@@ -2035,6 +2142,7 @@ async function addBatchFiles(fs: FileList | File[]): Promise<void> {
         id: `${Date.now()}-${batchSeq++}`, name: f.name || 'image',
         image: ref, thumb: thumbURL(ref), status: 'queued',
       });
+      dbg('batch', `queued "${f.name}" ${ref.width}×${ref.height} (${(px / 1e6).toFixed(1)} MP) · queue now ${batch.length}, ${((used + px) / 1e6).toFixed(1)} / ${(BATCH_MAX_PIXELS / 1e6).toFixed(0)} MP`);
     } catch {
       W.toast(`Could not decode ${f.name}`, true);
     }
@@ -2054,6 +2162,7 @@ function hasUnsavedWork(): boolean {
 
 /** Any batch item opens in the full single-image flow (same engine, same mask model). */
 async function openBatchItem(it: BatchItem) {
+  dbg('batch', `openBatchItem "${it.name}" · status=${it.status} · hasMask=${!!it.mask} · unsavedWork=${hasUnsavedWork()}`);
   if (batchBusy) { W.toast('Batch is using the model — wait a few seconds', true); return; }
   // Opening an item REPLACES the one global editor session: image, mask, undo
   // history, effects, background and transform are all overwritten below, and
@@ -2115,6 +2224,7 @@ function enterBatch() {
 
 async function downloadItemPNG(it: BatchItem): Promise<void> {
   if (!it.mask) return;
+  const t0 = now();
   const tmp = document.createElement('canvas');
   drawComposite(tmp, { image: it.image, mask: it.mask }, { kind: 'transparent' }, FX_OFF);
   const blob: Blob | null = await new Promise((res) => tmp.toBlob(res, 'image/png'));
@@ -2124,6 +2234,7 @@ async function downloadItemPNG(it: BatchItem): Promise<void> {
   a.download = `${stem(it.name)}-cutout.png`;
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  dbg('batch', `PNG for "${it.name}" in ${(now() - t0).toFixed(0)}ms · ${(blob.size / 1048576).toFixed(2)} MB`);
   W.toast(`Exported ${a.download}`);
 }
 
@@ -2212,6 +2323,7 @@ async function exportAllZIP(): Promise<void> {
   }
   if (files.length === 0) { renderBatch(); return; }
   const zip = zipStore(files);
+  dbg('batch', `ZIP ${files.length} file(s) · ${(zip.length / 1048576).toFixed(2)} MB stored (uncompressed)`);
   const url = URL.createObjectURL(new Blob([zip.buffer as ArrayBuffer], { type: 'application/zip' }));
   const a = document.createElement('a');
   a.href = url;
@@ -2276,6 +2388,7 @@ function closeConfirm(result: boolean) {
 // can carry real diagnostics. Pixel-free by construction: only short text.
 const diagLog: string[] = [];
 function noteDiag(kind: string, msg: string) {
+  dbg('diag', `${kind}: ${String(msg).slice(0, 150)}`);
   const t = new Date().toISOString().slice(11, 19);
   diagLog.push(`[${t}] ${kind}: ${String(msg).slice(0, 150)}`);
   if (diagLog.length > 60) diagLog.splice(0, diagLog.length - 60);
@@ -2328,6 +2441,20 @@ function submitReport() {
 }
 
 // ---------- install overrides ----------
+
+// Console helpers for the perf hunt: `rmbg()` replays the current session as a
+// table, `rmbg.time()` gives ms since page load.
+Object.assign(window as unknown as Record<string, unknown>, {
+  rmbg: () => dbgTable('diag', 'current session', {
+    backend: state.backend, label: backendLabel(), gpu: gpuDesc,
+    cacheName, model: MODEL_ID,
+    image: state.image ? `${state.image.width}×${state.image.height}` : 'none',
+    mask: state.mask ? `${state.mask.width}×${state.mask.height}` : 'none',
+    removal: removalOn(), compare: lastCompare,
+    undoDepth: state.log.depth, scanning: isScanning(), workerDead,
+  }),
+  rmbgTime: () => now(),
+});
 
 W.loadFile = realLoadFile;
 W.startPreparing = realStart;
