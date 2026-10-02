@@ -1659,9 +1659,10 @@ const batchPicker = (() => {
   el.hidden = true;
   document.body.appendChild(el);
   el.addEventListener('change', () => {
-    const fs = el.files;
+    // Copy first: resetting el.value below drains the live FileList.
+    const fs = [...(el.files ?? [])];
     el.value = '';
-    if (fs && fs.length > 0) void addBatchFiles(fs);
+    if (fs.length > 0) void addBatchFiles(fs);
   });
   return el;
 })();
