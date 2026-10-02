@@ -198,6 +198,7 @@
   .seg button{border:0;background:transparent;color:var(--muted);font-size:11.5px;font-weight:700;
     padding:6px 11px;letter-spacing:.03em}
   .seg button.on{background:var(--panel2);color:var(--accent)}
+  .seg button:disabled{opacity:.32;cursor:not-allowed}
   #localBtn{display:inline-flex;align-items:center;gap:7px;background:none;border:1px solid transparent;
     color:var(--muted);font-size:12px;border-radius:7px;padding:5px 9px}
   #localBtn:hover{border-color:var(--border);color:var(--text)}
@@ -214,12 +215,29 @@
   .card h4{font-size:13px;font-weight:700;margin-bottom:4px}
   .card p.desc{font-size:12.5px;color:var(--muted);line-height:1.5}
   .okline{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:650;color:var(--accent)}
+  /* removal switch — a real <button role="switch">, not a range input: removal is
+     binary, and a range slider would be both ambiguous and keyboard-hostile. */
+  .switch{display:flex;align-items:center;gap:12px;width:100%;text-align:left;
+    padding:12px;border:1px solid var(--border);border-radius:var(--radius);
+    background:var(--panel);color:inherit;font:inherit;cursor:pointer}
+  .switch:hover{border-color:#3a434d}
+  .switch .track{position:relative;flex:0 0 42px;width:42px;height:24px;border-radius:99px;
+    background:#232b33;border:1px solid var(--border);transition:background .16s,border-color .16s}
+  .switch .track::after{content:"";position:absolute;top:2px;left:2px;width:18px;height:18px;
+    border-radius:50%;background:var(--muted);transition:transform .16s,background .16s}
+  .switch.on .track{background:var(--accent-dim);border-color:rgba(52,211,153,.6)}
+  .switch.on .track::after{transform:translateX(18px);background:var(--accent)}
+  .switch .t{display:block;font-size:13px;font-weight:650}
+  .switch .s{display:block;font-size:11.5px;color:var(--faint);margin-top:2px}
+  .switch.on .s{color:var(--muted)}
+  .switch:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
   .row{display:flex;gap:8px}
   .row .btn{flex:1;justify-content:center}
   .radio{display:flex;align-items:center;gap:9px;padding:9px 10px;border:1px solid var(--border);
     border-radius:8px;margin-top:8px;cursor:pointer;font-size:13px;transition:all .13s}
   .radio:hover{border-color:#3a434d}
   .radio.on{border-color:rgba(52,211,153,.55);background:var(--accent-dim)}
+  .radio.muted{opacity:.4}
   .radio .r{width:14px;height:14px;border-radius:50%;border:2px solid var(--faint);flex:0 0 14px}
   .radio.on .r{border-color:var(--accent);background:var(--accent);box-shadow:inset 0 0 0 2.5px #10151a}
   .slider-row{margin-top:12px}
@@ -648,12 +666,17 @@
       <aside class="ctx" id="ctxPanel">
         <div class="panel on" id="p-remove">
           <h3>REMOVE</h3>
-          <div class="card">
-            <div class="okline"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>Background removed</div>
-            <p class="desc" style="margin-top:6px">Subject detected locally · runs on your device</p>
-            <div class="row" style="margin-top:10px"><button class="btn small" id="btnRecompute">Recompute</button></div>
+          <button class="switch" id="removeSwitch" type="button" role="switch" aria-checked="false">
+            <span class="track" aria-hidden="true"></span>
+            <span>
+              <span class="t">Remove background</span>
+              <span class="s" id="removeStatus">Original photo</span>
+            </span>
+          </button>
+          <div class="row hidden" style="margin-top:10px" id="recomputeRow">
+            <button class="btn small" id="btnRecompute">Recompute</button>
           </div>
-          <div class="card">
+          <div class="card" style="margin-top:12px">
             <h4>Detection</h4>
             <div class="radio on"><span class="r"></span>Auto</div>
             <div class="radio"><span class="r"></span>Person</div>
@@ -991,7 +1014,6 @@ $$("[data-br]").forEach(b=>b.onclick=()=>{
 });
 $$("[data-g]").forEach(b=>b.onclick=()=>{$$("[data-g]").forEach(x=>x.classList.toggle("on",x===b)); toast("Guided region selected"+MOCK);});
 $("#btnRecompGo").onclick=()=>runScan("Recomputing selection…");
-$("#btnRecompute").onclick=()=>runScan("Recomputing…");
 
 /* generic radios + choices */
 $$(".card").forEach(card=>{

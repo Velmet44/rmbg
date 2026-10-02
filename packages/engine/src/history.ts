@@ -27,6 +27,29 @@ export class OpLog {
     this.push({ label, undo, redo });
   }
 
+  /** Replace the held mask as a single undo step.
+   *
+   *  `holder` is any `{ mask: AlphaMask | null }` — the app's state object
+   *  satisfies it directly, so there is no adapter layer.
+   *
+   *  This exists because committing a replacement mask the naive way
+   *  (`commitRegion(newMask, label, () => null)`) snapshots the NEW mask as its
+   *  own pre-image: undo then reports success, changes nothing on screen, and
+   *  still consumes a slot. Capturing `holder.mask` BEFORE the swap is the whole
+   *  point, so undo restores a genuinely different previous result. */
+  replaceMask(
+    holder: { mask: AlphaMask | null }, label: string, next: AlphaMask,
+    onChange?: () => void,
+  ): void {
+    const prev = holder.mask;
+    holder.mask = next;
+    this.push({
+      label,
+      undo: () => { holder.mask = prev; onChange?.(); },
+      redo: () => { holder.mask = next; onChange?.(); },
+    });
+  }
+
   /** Paint one brush stroke into the mask as a single undo step. Strokes with
    *  no points are ignored rather than recorded as a no-op entry. */
   applyBrush(

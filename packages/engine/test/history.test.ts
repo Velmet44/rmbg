@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { OpLog } from '../src/history.js';
 import { createMask } from '../src/mask.js';
 import { applyBrushStroke } from '../src/ops.js';
+import type { AlphaMask } from '../src/types.js';
 
 describe('OpLog', () => {
   it('undo/redo round-trips a brush stroke', () => {
@@ -50,6 +51,65 @@ describe('OpLog', () => {
     expect(m.alpha[0]).toBeCloseTo(0.5);
     expect(log.redo()).toBe('feather=3');
     expect(fx.feather).toBe(3);
+  });
+
+  describe('replaceMask', () => {
+    it('undo restores the genuinely previous mask, not a copy of the new one', () => {
+      // The bug this replaces: commitRegion(newMask, label, () => null)
+      // snapshotted the NEW mask as its own pre-image, so undo reported
+      // success, changed nothing, and still burned a slot.
+      const holder: { mask: AlphaMask | null } = { mask: null };
+      const log = new OpLog();
+      const first = createMask(8, 8, 1);
+      const second = createMask(8, 8, 0.5);
+
+      log.replaceMask(holder, 'ai', first);
+      expect(holder.mask).toBe(first);
+      expect(log.undo()).toBe('ai');
+      expect(holder.mask).toBeNull(); // before any cutout existed
+
+      log.redo();
+      expect(holder.mask).toBe(first);
+
+      log.replaceMask(holder, 'recompute', second);
+      expect(holder.mask).toBe(second);
+      log.undo();
+      expect(holder.mask).toBe(first);
+      expect(holder.mask!.alpha[0]).toBe(1); // actually the old values
+      log.redo();
+      expect(holder.mask).toBe(second);
+      expect(holder.mask!.alpha[0]).toBeCloseTo(0.5);
+    });
+
+    it('redo stack clears on a new replacement', () => {
+      const holder: { mask: AlphaMask | null } = { mask: null };
+      const log = new OpLog();
+      log.replaceMask(holder, 'a', createMask(4, 4, 1));
+      log.undo();
+      log.replaceMask(holder, 'b', createMask(4, 4, 0.25));
+      expect(log.canRedo).toBe(false);
+      expect(log.undo()).toBe('b');
+      expect(holder.mask).toBeNull();
+    });
+
+    it('runs the redraw hook on undo and redo', () => {
+      const holder: { mask: AlphaMask | null } = { mask: null };
+      const log = new OpLog();
+      let redraws = 0;
+      log.replaceMask(holder, 'ai', createMask(4, 4, 1), () => redraws++);
+      log.undo();
+      log.redo();
+      expect(redraws).toBe(2);
+    });
+
+    it('one entry per replacement, so depth tracks real operations', () => {
+      const holder: { mask: AlphaMask | null } = { mask: null };
+      const log = new OpLog();
+      log.replaceMask(holder, 'ai', createMask(4, 4, 1));
+      expect(log.depth).toBe(1);
+      log.undo();
+      expect(log.depth).toBe(0);
+    });
   });
 
   it('AI-scale ops fall back to full snapshots', () => {

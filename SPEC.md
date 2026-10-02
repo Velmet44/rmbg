@@ -70,7 +70,10 @@ Unsupported or undecodable input must produce: format name (when known), why it 
 
 ### 3.2 Remove
 
-- One primary action: remove background.
+- The primary action is the **Remove background** switch in the Remove panel. It defaults to on once segmentation completes; the automatic flow is unchanged.
+- Toggling it **off shows the original photo and does not discard the mask**, so turning it back on restores the same cutout instantly with no second inference. Turning it on for an image that has never been segmented runs segmentation and reports progress.
+- Recompute is available only while removal is on and a mask exists. The old cutout stays visible until a replacement is ready; a failure keeps the old result and reports why.
+- Recompute, region recompute, guided select and the brushes all stand down while removal is off — they would edit pixels that are not on screen.
 - Detection mode default is `Auto` (general subject). An optional subject hint (`person`, `product`, `animal`, `auto`) may bias the model where supported; it must never be required.
 - Quality mode: single automatic tier in V1 (fast model). The user must not need to understand the model to use it.
 - Recompute: re-run segmentation. Old result stays visible until the new result is ready.
@@ -112,6 +115,7 @@ Export is a compact settings step, not just a download link:
 - Format: PNG (primary, preserves transparency), WebP, JPEG, AVIF where the runtime supports encoding.
 - Resolution: Original (default, dimensions shown, e.g. `4032 × 3024`) or Custom.
 - Background: Transparent or Current background. `Current` means whatever the Background panel set, so the file matches what is on screen; `Transparent` forces the cutout only, for this export, without touching the stored background. The drawer states which of the two will actually be written.
+- With removal switched off the file is the untouched original photo: the background choice and the finishing effects cannot apply to it, and the export note says so rather than dropping them silently.
 - JPEG cannot carry transparency: selecting JPEG with transparency active must force an explicit background choice (white / black / current / custom color). Never silently flatten.
 - Export button labels the exact outcome (e.g. `Export PNG`), shows progress, and reports the written file (format, dimensions, bytes).
 

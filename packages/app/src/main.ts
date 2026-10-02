@@ -45,6 +45,10 @@ interface AppState {
   image: ImageRef | null;
   previewURL: string | null;
   mask: AlphaMask | null;
+  /** The Remove panel's switch. FALSE does NOT mean "no cutout exists" — the
+   *  mask is always kept, so turning removal back on is instant and lossless.
+   *  It means "do not apply the mask", i.e. show and export the original photo. */
+  removeBg: boolean;
   backend: string;
   log: OpLog;
   fx: Effects;
@@ -53,9 +57,28 @@ interface AppState {
 }
 
 const state: AppState = {
-  image: null, previewURL: null, mask: null, backend: '…', log: new OpLog(),
+  image: null, previewURL: null, mask: null, removeBg: false, backend: '…', log: new OpLog(),
   fx: JSON.parse(JSON.stringify(FX_OFF)), bg: { ...BG_TRANSPARENT }, tr: { ...TR_IDENTITY },
 };
+
+/** Is a cutout actually being applied? Every consumer (display, export, undo,
+ *  refine tools) must ask this rather than testing `state.mask`, because a mask
+ *  can exist while the user has deliberately switched removal off. */
+function removalOn(): boolean {
+  return state.removeBg && state.mask !== null;
+}
+
+/** All-ones mask ("keep everything"), cached per size. Lets the original photo
+ *  flow through the SAME composite/export path instead of branching in each
+ *  consumer — over any background an opaque subject hides it completely, and
+ *  feather/defringe/shadow are provably no-ops on a constant 1.0 field. */
+let opaqueCache: { w: number; h: number; mask: AlphaMask } | null = null;
+function opaqueMask(w: number, h: number): AlphaMask {
+  if (!opaqueCache || opaqueCache.w !== w || opaqueCache.h !== h) {
+    opaqueCache = { w, h, mask: { width: w, height: h, alpha: new Float32Array(w * h).fill(1) } };
+  }
+  return opaqueCache.mask;
+}
 
 function snapshotParams() {
   return {
@@ -85,9 +108,14 @@ function commitFx(label: string, mut: () => void) {
 /** Canonical mask + finishing params → the pixels actually shown/exported.
  *  Transform applies only over a replacement background (SPEC); feather/
  *  defringe are presentation-time on a copy — the canonical mask is never
- *  touched except by AI, brushes, guided, and recompute. */
+ *  touched except by AI, brushes, guided, and recompute.
+ *
+ *  Removal off: the untouched original. Transform and finishing are skipped
+ *  entirely because there is no cutout for them to act on. */
 function derivedView(): { image: ImageRef; mask: AlphaMask } {
-  const img = state.image!, msk = state.mask!;
+  const img = state.image!;
+  if (!removalOn()) return { image: img, mask: opaqueMask(img.width, img.height) };
+  const msk = state.mask!;
   let image = img, mask = msk;
   if (state.bg.kind !== 'transparent' && !isIdentityTransform(state.tr)) {
     const t = transformSubject(img, msk, state.tr);
@@ -99,6 +127,14 @@ function derivedView(): { image: ImageRef; mask: AlphaMask } {
     mask = copy;
   }
   return { image, mask };
+}
+
+/** Replace the canonical mask as ONE undoable step, capturing the previous mask
+ *  BEFORE the swap. The bookkeeping lives in `OpLog.replaceMask` so it is unit
+ *  tested; this only supplies the app's redraw hook. */
+function commitMaskSwap(label: string, next: AlphaMask): AlphaMask {
+  state.log.replaceMask(state, label, next, refreshDisplay);
+  return next;
 }
 
 // ---------- worker client ----------
@@ -494,12 +530,23 @@ function refreshDisplay(): void {
 }
 
 function renderDisplay() {
-  if (!state.image || !state.mask || !resultCanvas) return;
+  if (!state.image || !resultCanvas) return;
   syncUndoRedo();
   syncStrokeButtons();
+  syncRemoveSwitch();
   const demo = $('#demoSubject') as HTMLElement;
   demo.style.display = 'none';
   const up = $('#uploadedImg') as HTMLImageElement;
+  // Removal off (or no cutout yet): the original photo is the only truthful
+  // thing to show. Cutout views are meaningless here, so Original wins and the
+  // split overlay is torn down rather than left showing stale panes.
+  const mask = state.mask;
+  if (!state.removeBg || !mask) {
+    up.style.display = 'block';
+    resultCanvas.style.display = 'none';
+    ($('#splitUI') as HTMLElement).classList.remove('on');
+    return;
+  }
   if (lastCompare === 'split') {
     up.style.display = 'none';
     resultCanvas.style.display = 'none';
@@ -518,11 +565,11 @@ function renderDisplay() {
   } else if (lastCompare === 'mask') {
     up.style.display = 'none';
     resultCanvas.style.display = 'block';
-    drawMaskGray(resultCanvas, state.mask);
+    drawMaskGray(resultCanvas, mask);
   } else if (lastCompare === 'overlay') {
     up.style.display = 'none';
     resultCanvas.style.display = 'block';
-    drawOverlay(resultCanvas, state.image, state.mask);
+    drawOverlay(resultCanvas, state.image, mask);
   } else {
     up.style.display = 'none';
     resultCanvas.style.display = 'block';
@@ -560,6 +607,7 @@ async function realLoadFile(f: File) {
     const ref = await decodeToImageRef(f, f.name);
     state.image = ref;
     state.mask = null;
+    state.removeBg = false;
     state.log = new OpLog();
     if (state.previewURL) URL.revokeObjectURL(state.previewURL);
     state.previewURL = URL.createObjectURL(f);
@@ -576,15 +624,16 @@ async function realLoadFile(f: File) {
   }
 }
 
-async function segmentCurrent(label: string): Promise<AlphaMask> {
+/** Run full-image segmentation and return the new mask. Does NOT touch
+ *  `state.mask` or the history — callers wrap it in `commitMaskSwap` so the
+ *  previous mask is captured before it is replaced. */
+async function segmentCurrent(): Promise<AlphaMask> {
   const img = state.image!;
   // Copy: the buffer is transferred to the worker (neutering the copy keeps
   // the main-thread original intact for compositing).
   const copy = new Uint8ClampedArray(img.rgb);
   const res = await callWorker({ type: 'segment', imageId: img.id, w: img.width, h: img.height, rgb: copy.buffer }, [copy.buffer]);
-  const mask: AlphaMask = { width: res.w, height: res.h, alpha: new Float32Array(res.alpha) };
-  state.log.commitRegion(mask, label, () => null);
-  return mask;
+  return { width: res.w, height: res.h, alpha: new Float32Array(res.alpha) };
 }
 
 async function realStart(_withDemo: boolean) {
@@ -612,7 +661,8 @@ async function realStart(_withDemo: boolean) {
       : state.backend.startsWith('wasm') ? 'CPU' : state.backend;
     setBar(0.85, `model ready — removing background on-device (${backendLabel})`);
     const t0 = performance.now();
-    state.mask = await segmentCurrent('ai');
+    commitMaskSwap('ai', await segmentCurrent());
+    state.removeBg = true;
     if (my !== prepToken) return; // Back hit mid-inference: discard, don't pop the editor open
     stopElapsed();
     setBar(1, 'done');
@@ -647,10 +697,14 @@ async function realStart(_withDemo: boolean) {
 
 async function rerun() {
   if (!state.image) return;
+  if (!removalOn()) { W.toast('Turn on “Remove background” first', true); return; }
   W.runScan('Recomputing…');
   startElapsed('recomputing');
   try {
-    state.mask = await segmentCurrent('recompute');
+    // The old cutout stays on screen until the new one is ready (SPEC 3.2):
+    // commitMaskSwap only fires after the worker returns.
+    commitMaskSwap('recompute', await segmentCurrent());
+    state.removeBg = true;
     stopElapsed();
     refreshDisplay();
     W.toast('Recomputed');
@@ -724,6 +778,21 @@ function guardSplit(): boolean {
   return true;
 }
 
+/** Guard for anything that mutates the mask or stages new paint. Two reasons to
+ *  stand down: no cutout is being applied (the tools would edit pixels nobody
+ *  can see), or an inspect-only compare mode is showing. */
+function guardEditing(): boolean {
+  if (!removalOn()) {
+    const now = Date.now();
+    if (now - splitNoteAt > 2500) {
+      splitNoteAt = now;
+      W.toast('Turn on “Remove background” to edit the cutout');
+    }
+    return true;
+  }
+  return guardSplit();
+}
+
 function realCompare(m: string) {
   revealToken++;
   lastCompare = m;
@@ -736,8 +805,10 @@ function realCompare(m: string) {
   (W as any).__rmbgSplitLock = (m === 'split' || m === 'overlay');
   ($('#splitUI') as HTMLElement).classList.toggle('on', m === 'split');
   $$('.seg button').forEach((b) => (b as HTMLElement).classList.toggle('on', (b as HTMLElement).dataset.view === m));
-  if (!state.mask) {
-    W.toast(m === 'mask' ? 'Mask: white kept · black removed' : 'Original pixels — never destroyed');
+  if (!removalOn()) {
+    // Without a cutout there is nothing to compare against; the switch and the
+    // compare group are what the user should be looking at instead.
+    W.toast('Turn on “Remove background” to use cutout views');
     return;
   }
   refreshDisplay();
@@ -749,6 +820,121 @@ function realCompare(m: string) {
 function selectedFormat(): string {
   const on = document.querySelector('.fmt.on') as HTMLElement | null;
   return on?.dataset.fmt ?? 'PNG';
+}
+
+// ---------- the Remove panel switch ----------
+
+/** Compare modes that only mean something with a cutout on screen. */
+const CUTOUT_MODES = ['split', 'overlay', 'mask'];
+
+/** Reflect removal state into the switch, the status line, the Recompute row
+ *  and the compare group. Called from every redraw so undo/redo and toggling
+ *  can never leave the controls describing a state that is not on screen. */
+function syncRemoveSwitch() {
+  const sw = $('#removeSwitch') as HTMLElement | null;
+  const on = removalOn();
+  if (sw) {
+    sw.classList.toggle('on', on);
+    sw.setAttribute('aria-checked', String(on));
+  }
+  const status = $('#removeStatus') as HTMLElement | null;
+  if (status) {
+    status.textContent = !state.image ? 'No image loaded'
+      : on ? 'Background removed'
+      : state.mask ? 'Original photo · cutout kept'
+      : 'Original photo';
+  }
+  // Recompute is meaningful only when there is a cutout to recompute.
+  ($('#recomputeRow') as HTMLElement | null)?.classList.toggle('hidden', !on);
+  $$('.seg button').forEach((b) => {
+    const v = (b as HTMLElement).dataset.view ?? '';
+    (b as HTMLButtonElement).disabled = !on && CUTOUT_MODES.includes(v);
+  });
+  // The export drawer's background choice has no effect on the original photo.
+  $$('#exportWrap .radio').forEach((r) => (r as HTMLElement).classList.toggle('muted', !on));
+  // The drawer's derived text depends on removal state too, and this function
+  // is the single owner of that state — including when callers set
+  // `state.removeBg` directly (realStart, rerun, openBatchItem) rather than
+  // going through setRemoval().
+  refreshExpDims();
+}
+
+/** Turn removal on/off as one undo step, then reconcile the view. */
+function setRemoval(next: boolean, opts: { silent?: boolean } = {}) {
+  if (next === state.removeBg) { syncRemoveSwitch(); return; }
+  const prev = state.removeBg;
+  state.removeBg = next;
+  state.log.commit(
+    next ? 'remove background on' : 'remove background off',
+    () => { state.removeBg = prev; afterRemovalChange(); },
+    () => { state.removeBg = next; afterRemovalChange(); },
+  );
+  afterRemovalChange();
+  if (!opts.silent) {
+    W.toast(next ? 'Background removed' : 'Showing the original photo');
+  }
+}
+
+function afterRemovalChange() {
+  // Turning removal off from a cutout view lands on Original; turning it back
+  // on returns to the cutout the user was last looking at.
+  if (!state.removeBg && lastCompare !== 'before') {
+    lastCompare = 'before';
+    W.compareMode = 'before';
+    $$('.seg button').forEach((b) => (b as HTMLElement).classList.toggle('on', (b as HTMLElement).dataset.view === 'before'));
+  }
+  if (state.removeBg && lastCompare === 'before') {
+    lastCompare = 'after';
+    W.compareMode = 'after';
+    $$('.seg button').forEach((b) => (b as HTMLElement).classList.toggle('on', (b as HTMLElement).dataset.view === 'after'));
+  }
+  refreshDisplay();
+  syncFxControls();
+  syncUndoRedo();
+}
+
+/** Turning removal ON for an image that has never been segmented (an
+ *  unprocessed batch item, say) has to actually do the work rather than
+ *  silently showing the original. */
+async function enableRemoval() {
+  if (!state.image) return;
+  setRemoval(true, { silent: true });
+  if (state.mask) { syncRemoveSwitch(); refreshDisplay(); return; }
+  W.runScan('Removing background…');
+  startElapsed('working');
+  syncRemoveSwitch();
+  try {
+    await ensureReady();
+    commitMaskSwap('ai', await segmentCurrent());
+    state.removeBg = true;
+    W.showView('view-editor');
+    lastCompare = 'after';
+    W.compareMode = 'after';
+    refreshDisplay();
+    W.toast('Background removed');
+  } catch (e) {
+    state.removeBg = false;
+    W.toast(`Could not remove background: ${String(e).slice(0, 120)}`, true);
+  } finally {
+    stopElapsed();
+    syncRemoveSwitch();
+    refreshDisplay();
+  }
+}
+
+function installRemoveSwitch() {
+  const sw = $('#removeSwitch') as HTMLButtonElement;
+  // A <button role="switch"> already handles Enter/Space; this just prevents
+  // the Space-to-pan shortcut on the stage from stealing the keypress.
+  sw.addEventListener('click', () => { void (state.removeBg ? setRemovalOff() : enableRemoval()); });
+}
+async function setRemovalOff() {
+  if (state.mask) { setRemoval(false); return; }
+  // Nothing was ever segmented: the switch is already showing the original and
+  // there is no state change worth recording.
+  state.removeBg = false;
+  syncRemoveSwitch();
+  refreshDisplay();
 }
 
 /** Export drawer's BACKGROUND choice.
@@ -770,11 +956,12 @@ function bgHexOf(color: [number, number, number]): string {
 /** JPEG cannot carry alpha. Driven from ONE place: the shell used to toggle
  *  the warning on format click while syncFxControls toggled it on background
  *  kind, so the two fought and the warning did not describe the choice the
- *  export would actually make. */
+ *  export would actually make. Irrelevant with removal off — the original photo
+ *  is opaque, so JPEG needs no flattening. */
 function refreshJpegWarn(): void {
   const el = $('#jpegWarn') as HTMLElement | null;
   if (!el) return;
-  const lossy = selectedFormat() === 'JPEG' && effectiveExportBg().kind === 'transparent';
+  const lossy = selectedFormat() === 'JPEG' && removalOn() && effectiveExportBg().kind === 'transparent';
   el.classList.toggle('hidden', !lossy);
 }
 
@@ -782,7 +969,9 @@ function refreshJpegWarn(): void {
 function refreshExpBgNote(): void {
   const el = $('#expBgNote') as HTMLElement | null;
   if (!el) return;
-  if (exportBg === 'transparent') {
+  if (!removalOn()) {
+    el.textContent = 'Removal is off — this exports the original photo, so the background choice does not apply.';
+  } else if (exportBg === 'transparent') {
     el.textContent = 'Cutout only — alpha preserved.';
   } else if (state.bg.kind === 'color') {
     el.textContent = `Solid ${bgHexOf(state.bg.color ?? [255, 255, 255]).toUpperCase()} from the Background panel.`;
@@ -844,7 +1033,8 @@ function refreshExpDims() {
   if (!state.image) return;
   const { w, h } = exportSize();
   const fmt = selectedFormat();
-  const bg = effectiveExportBg().kind === 'transparent' ? 'transparent' : 'with background';
+  const bg = !removalOn() ? 'original photo'
+    : effectiveExportBg().kind === 'transparent' ? 'transparent' : 'with background';
   $('#expDims').textContent = `${w} × ${h} · ${fmt} · ${bg}${customRes ? ' · custom' : ''}`;
 }
 
@@ -901,7 +1091,7 @@ function exportCanvas(view: { image: ImageRef; mask: AlphaMask }, bg: Background
 }
 
 async function realExport() {
-  if (!state.image || !state.mask || !resultCanvas) { W.toast('Nothing to export yet', true); return; }
+  if (!state.image) { W.toast('Nothing to export yet', true); return; }
   let fmt = selectedFormat();
   if (fmt === 'AVIF' && !(await avifSupported())) {
     W.toast('AVIF not supported in this browser — exporting PNG instead', true);
@@ -912,11 +1102,18 @@ async function realExport() {
   wrap.classList.remove('hidden');
   ($('#expBar') as HTMLElement).style.width = '15%';
   try {
+    const cutout = removalOn();
     const view = derivedView();
     const size = exportSize();
-    let bg = effectiveExportBg();
+    // Removal off: the file is the original photo, so the drawer's background
+    // choice and the finishing effects cannot apply to it. Say so, never
+    // silently drop them.
+    let bg: Background = cutout ? effectiveExportBg() : { kind: 'transparent' };
+    const fxUsed = cutout ? state.fx : FX_OFF;
     let note = `${size.w} × ${size.h} · ${fmt}`;
-    if (fmt === 'JPEG' && bg.kind === 'transparent') {
+    if (!cutout) {
+      note += ' · original photo (removal off)';
+    } else if (fmt === 'JPEG' && bg.kind === 'transparent') {
       // JPEG cannot carry transparency: composite onto white for this export
       // only (stated, never silent), without touching the stored mask or the
       // drawer's background choice.
@@ -929,7 +1126,7 @@ async function realExport() {
       const pct = Math.round((100 * size.w) / state.image.width);
       note += pct === 100 ? ' · custom size' : pct < 100 ? ` · downscaled to ${pct}%` : ` · upscaled to ${pct}%`;
     }
-    const canvas = exportCanvas(view, bg, state.fx, size.w, size.h);
+    const canvas = exportCanvas(view, bg, fxUsed, size.w, size.h);
     ($('#expBar') as HTMLElement).style.width = '60%';
     const mime = fmt === 'PNG' ? 'image/png'
       : fmt === 'WebP' ? 'image/webp'
@@ -1005,7 +1202,7 @@ function installStrokeCapture() {
   const stage = $('#stage') as HTMLElement;
   stage.addEventListener('pointerdown', (e) => {
     if (!brushActive() || (e.button !== 0 && e.pointerType === 'mouse')) return;
-    if (guardSplit()) return;
+    if (guardEditing()) return;
     const pt = paintPoint(e as PointerEvent);
     if (!pt) return;
     const size = +(( $('#brushSize') as HTMLInputElement)?.value ?? 48);
@@ -1031,6 +1228,7 @@ function installStrokeCapture() {
   });
   ($('#btnApplyStrokes') as HTMLButtonElement)?.addEventListener('click', () => {
     if (!state.mask || pendingStrokes.length === 0) return;
+    if (guardEditing()) return;
     const paint = $('#paintLayer') as HTMLCanvasElement | null;
     const sx = paint && paint.width > 0 ? state.mask.width / paint.width : 1;
     const sy = paint && paint.height > 0 ? state.mask.height / paint.height : 1;
@@ -1359,7 +1557,7 @@ function installRefineCapture() {
   stage.addEventListener('pointerdown', (e) => {
     if (!state.mask) return;
     if (refineMode() === 'recompute' && (e.button === 0 || e.pointerType !== 'mouse')) {
-      if (guardSplit()) return;
+      if (guardEditing()) return;
       const pt = toImageCoords(e as PointerEvent);
       if (pt) { anchor = pt; boxToClient(pt, pt); }
     }
@@ -1395,7 +1593,7 @@ function installRefineCapture() {
     }
     // Guided: a clean click (not a drag) selects + applies a region.
     if (refineMode() === 'guided' && moved < 6 && state.image && state.mask) {
-      if (guardSplit()) return;
+      if (guardEditing()) return;
       const pt = toImageCoords(e as PointerEvent);
       if (pt) void guidedApply(pt.x, pt.y);
     }
@@ -1415,7 +1613,7 @@ function installRefineCapture() {
 
 async function recomputeApply() {
   if (!state.image || !state.mask) return;
-  if (guardSplit()) return;
+  if (guardEditing()) return;
   if (!recompBox) { W.toast('Drag a box over the problem area first'); return; }
   const box = { ...recompBox };
   W.runScan('Re-evaluating selection…');
@@ -1429,12 +1627,7 @@ async function recomputeApply() {
       mw: state.mask.width, mh: state.mask.height, alpha: maskCopy.buffer,
       bbox: box,
     }, [imgCopy.buffer, maskCopy.buffer]);
-    const prev = state.mask;
-    const next = { width: res.w, height: res.h, alpha: new Float32Array(res.alpha) };
-    state.mask = next;
-    state.log.commit('recompute region',
-      () => { state.mask = prev; refreshDisplay(); },
-      () => { state.mask = next; refreshDisplay(); });
+    commitMaskSwap('recompute region', { width: res.w, height: res.h, alpha: new Float32Array(res.alpha) });
     recompBox = null;
     (boxEl() as HTMLElement).style.display = 'none';
     refreshDisplay();
@@ -1445,7 +1638,9 @@ async function recomputeApply() {
 }
 
 async function guidedApply(x: number, y: number) {
-  if (lastCompare === 'split') return; // caller already toasted via guardSplit
+  // Caller already ran guardEditing(); this is belt-and-braces for the batch
+  // path, which can reach here with removal switched off.
+  if (!removalOn() || lastCompare === 'split') return;
   const img = state.image!, mask = state.mask!;
   const mode = guidedMode();
   // Grow on a downsampled copy: texture (spots, grain, fur) averages out so
@@ -1726,11 +1921,14 @@ async function openBatchItem(it: BatchItem) {
   // No baseline history entry for the mask we just adopted. The old code
   // committed one with a null box, which snapshotted the mask as its own
   // pre-image: undo reported "Undone: batch", changed nothing, and burned a
-  // slot (the same defect as the AI entry in segmentCurrent).
+  // slot (the same defect the AI entry had).
   state.log = new OpLog();
   state.fx = JSON.parse(JSON.stringify(FX_OFF));
   state.bg = { ...BG_TRANSPARENT };
   state.tr = { ...TR_IDENTITY };
+  // A finished batch item opens showing its cutout; an unprocessed one opens on
+  // the original, and its switch is live so one tap segments it.
+  state.removeBg = state.mask !== null;
   if (state.previewURL) URL.revokeObjectURL(state.previewURL);
   state.previewURL = rgbToObjectURL(it.image);
   const up = $('#uploadedImg') as HTMLImageElement;
@@ -1983,6 +2181,8 @@ installStrokeCapture();
 syncStrokeButtons();
 installRefineCapture();
 wireExportDrawer();
+installRemoveSwitch();
+syncRemoveSwitch();
 // Scroll reveal for the FAQ (and anything else marked .reveal): fade/slide
 // in on entry, once. Root is the landing scroller; reduced-motion users
 // get everything visible immediately via CSS.

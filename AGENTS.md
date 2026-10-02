@@ -4,7 +4,7 @@
 
 ## Status
 - Docs: `README.md`, `SPEC.md`, `CONTRIBUTING.md`, `CONTRIBUTORS.md`, `LICENSE` (MIT).
-- `packages/engine` — pure-TS cutout engine, DOM-free. Test: `npx vitest run` in `packages/engine` (41 tests).
+- `packages/engine` — pure-TS cutout engine, DOM-free. Test: `npx vitest run` in `packages/engine` (45 tests).
 - `packages/app` — Vite app (mockup shell + real S1 wiring). Dev: `npx vite` in `packages/app`. Build: `npm run build --workspace @rmbg/app`. Serve built app: untracked `serve.bat` (localhost:8901).
 - Typecheck is a gate: `npm run typecheck --workspace @rmbg/engine` / `--workspace @rmbg/app`.
   The app `build` runs `tsc --noEmit` first, so a type error fails the deploy.
@@ -39,6 +39,14 @@
 - The app has ONE editing session (`state`). Anything that replaces it (opening
   a batch item) destroys the mask, the whole `OpLog`, the finishing params and
   the previous preview URL, with no undo. Route it through `confirmAction()`.
+- `state.removeBg` is the Remove panel's switch. FALSE does NOT mean "no mask":
+  the mask is always kept, so toggling back on is instant and lossless. Ask
+  `removalOn()`, never `state.mask`, when deciding what is on screen or
+  exportable — a mask can exist while the user has switched removal off.
+- Replacing the canonical mask goes through `OpLog.replaceMask` (or
+  `commitMaskSwap`), never `commitRegion(newMask, label, () => null)`: that
+  snapshots the NEW mask as its own pre-image, so undo reports success, changes
+  nothing, and still consumes a slot.
 - Compare modes: `after` | `before` | `split` | `overlay` | `mask`, all driven by
   `renderDisplay`. `split` and `overlay` are inspect-only (`guardSplit`,
   `__rmbgSplitLock`) — painting onto a tinted or side-by-side view would land

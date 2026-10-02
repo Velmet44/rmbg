@@ -79,6 +79,21 @@ Follow-up to the same review. 41 engine tests, 27 targeted browser checks and a
 | Dead code removed: `#skel`/`.skblock`, `#statesWrap`/`#statesDrawer`, `#hqBanner` (CSS with no markup at all), `#maskView`, `#btnOverlay`, "Save state" (toast-only lie), the `[data-ai]` handler (no markup), the mock `runExport` body, the dead shell `setCompare` copy (which referenced the removed `#maskView`), `paintMove`/`paintMoveAlias`. | absent from the live CSSOM and from `window`; `.seg` now has exactly 5 modes |
 | `drawComposite` split so the scratch-canvas blit is shared by the cutout, split, overlay, export and batch-PNG paths instead of duplicated. | regression pass: cutout/split/export pixels unchanged, export still writes a real `rmbg-export-1000x400.png` |
 
+## Remove-panel switch, and the AI undo defect (2026-10-02)
+
+45 engine tests, 30 targeted browser checks and a 20-check regression pass are green.
+
+| Fix | Evidence |
+|---|---|
+| The Remove panel showed a static "Background removed" line with a Recompute button beside it, so there was no way to choose *not* to remove. Replaced with a real `<button role="switch">` (binary ⇒ a switch, not a range slider: a range would be ambiguous and keyboard-hostile). Recompute now appears only while removal is on and a mask exists. | `BUTTON role=switch`, `aria-checked` tracks state, Recompute row hidden when off |
+| Turning removal off keeps the mask and shows the original; turning it back on restores the *same mask object* with no inference. | 24.6 ms, same object identity, restored cutout pixel-identical |
+| With removal off the editor, the cutout compare modes (Split/Overlay/Mask), Recompute, the refine tools and the export background choice all stand down — they would act on pixels that are not on screen. | those three seg buttons disabled; `guardEditing()` blocks brushes, guided and region recompute |
+| Export follows the switch: removal off writes the untouched original, ignoring the background choice and effects, and says so. | note reads `original photo (removal off)`; JPEG flattening warning correctly suppressed for an already-opaque original |
+| **AI removal was not actually undoable** (item #1, open since the first review). `segmentCurrent` committed the *new* mask as its own pre-image, so Undo reported success, changed nothing and burned a slot. Fixed by `OpLog.replaceMask`, which captures `holder.mask` before the swap; the same defect in `openBatchItem` was already gone. | 4 new engine tests incl. undo→`null` before any cutout, undo→old values after a recompute, redo-stack clearing, redraw hook. 45 total green |
+| The switch is one undo step, so toggling interacts correctly with brush/effect history. | depth +1 per toggle; undo/redo restore both `removeBg` and the control |
+| Fixed a real bug found by the switch: after the first automatic removal the export drawer still read "original photo", because `realStart`/`rerun`/`openBatchItem` set `removeBg` directly and nothing refreshed the drawer. `syncRemoveSwitch()` now owns that refresh. | dims reads `PNG · transparent` immediately after segmentation |
+| The same flow also fixed an export/display inconsistency: `realExport` required `state.mask` even when removal was off, making "export the original" impossible. | file written with removal off |
+
 ## PENDING (need adequate hardware: real GPU or stronger CPU)
 
 - In-browser cold/warm inference numbers for the quality tier.
