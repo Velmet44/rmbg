@@ -23,6 +23,7 @@ import {
   transformSubject,
   type CompositeResult,
   upsampleAlphaBilinear,
+  workingSize,
   type AlphaMask,
   type Background,
   type BBox,
@@ -107,6 +108,18 @@ function restoreParams(s: ParamSnap) {
   syncFxControls();
 }
 
+/** Finishing params back to their defaults. Both session-replacing paths must
+ *  call this: without it, opening a SECOND file through the normal picker
+ *  inherited the first one's finishing state — a subject translate expressed in
+ *  the old image's pixels (so `dx` could sit the subject entirely off-frame),
+ *  a retained background ImageRef, and slider labels describing an image that
+ *  is no longer on screen. */
+function resetSessionParams(): void {
+  state.fx = JSON.parse(JSON.stringify(FX_OFF));
+  state.bg = { ...BG_TRANSPARENT };
+  state.tr = { ...TR_IDENTITY };
+}
+
 /** Commit a finishing change (effects/background/transform) as one undo step. */
 function commitFx(label: string, mut: () => void) {
   const before = snapshotParams();
@@ -124,32 +137,72 @@ function commitFx(label: string, mut: () => void) {
  *
  *  Removal off: the untouched original. Transform and finishing are skipped
  *  entirely because there is no cutout for them to act on. */
-function derivedView(): { image: ImageRef; mask: AlphaMask } {
+type DerivedView = { image: ImageRef; mask: AlphaMask };
+
+/** Single-entry memo for the derived view.
+ *
+ *  `derivedView` is a pure function of (image, mask, fx, bg, tr), but it is
+ *  called from `refreshDisplay`, which fires on EVERY pointermove of every
+ *  slider, and its finishing step is the expensive one: a full-frame Float32
+ *  clone plus `refineEdges`, which blurs (2 more full-frame buffers) whenever
+ *  feather > 0 — and feather SHIPS with a default of 1. Measured at ~880 ms and
+ *  ~92 MB of garbage per call at 12 MP. Repeated per animation frame, a single
+ *  background-colour drag allocated gigabytes.
+ *
+ *  The key covers every input, so any change recomputes and a no-op redraw (a
+ *  zoom, a hover, a coalesced frame) reuses the previous buffers. */
+let derivedCache: { key: string; view: DerivedView } | null = null;
+
+function derivedView(): DerivedView {
   const img = state.image!;
-  if (!removalOn()) {
-    dbgThrottled('view', 'derivedView → original (removal off), opaque mask passthrough', 1000);
-    return { image: img, mask: opaqueMask(img.width, img.height) };
-  }
-  const msk = state.mask!;
-  let image = img, mask = msk;
-  if (state.bg.kind !== 'transparent' && !isIdentityTransform(state.tr)) {
-    const t = transformSubject(img, msk, state.tr);
-    image = t.image; mask = t.mask;
-  }
-  if (state.fx.feather > 0 || state.fx.defringe > 0) {
-    const copy: AlphaMask = { width: mask.width, height: mask.height, alpha: new Float32Array(mask.alpha) };
-    refineEdges(copy, state.fx);
-    mask = copy;
-  }
-  return { image, mask };
+  const fx = state.fx, bg = state.bg, tr = state.tr;
+  const msk = state.mask;
+  const on = removalOn();
+  const key = `${img.id}|${msk?.width}x${msk?.height}|${on ? 1 : 0}`
+    + `|${fx.feather},${fx.defringe},${fx.shadow.on},${fx.shadow.opacity},${fx.shadow.blur},${fx.shadow.dx},${fx.shadow.dy}`
+    + `|${bg.kind}|${tr.scale},${tr.rotation},${tr.dx},${tr.dy}`;
+  if (derivedCache && derivedCache.key === key) return derivedCache.view;
+
+  const build = (): DerivedView => {
+    if (!on) {
+      dbgThrottled('view', 'derivedView → original (removal off), opaque mask passthrough', 1000);
+      return { image: img, mask: opaqueMask(img.width, img.height) };
+    }
+    const m = msk!;
+    let image = img, mask = m;
+    if (bg.kind !== 'transparent' && !isIdentityTransform(tr)) {
+      const t = transformSubject(img, m, tr);
+      image = t.image; mask = t.mask;
+    }
+    if (fx.feather > 0 || fx.defringe > 0) {
+      const copy: AlphaMask = { width: mask.width, height: mask.height, alpha: new Float32Array(mask.alpha) };
+      refineEdges(copy, fx);
+      mask = copy;
+    }
+    return { image, mask };
+  };
+  const view = build();
+  derivedCache = { key, view };
+  return view;
 }
 
 /** Replace the canonical mask as ONE undoable step, capturing the previous mask
  *  BEFORE the swap. The bookkeeping lives in `OpLog.replaceMask` so it is unit
  *  tested; this only supplies the app's redraw hook. */
 function commitMaskSwap(label: string, next: AlphaMask): AlphaMask {
+  const img = state.image;
+  // Catch a mask sized for a different image HERE, at the assignment, rather
+  // than one layer deeper inside composite() — which throws from inside a
+  // requestAnimationFrame callback, so the editor is left blank and every later
+  // frame throws again. Asserting here makes it one caught error.
+  if (img && (next.width !== img.width || next.height !== img.height)) {
+    throw new Error(
+      `commitMaskSwap: mask ${next.width}x${next.height} does not match image ${img.width}x${img.height}`,
+    );
+  }
   dbg('mask', `commitMaskSwap "${label}" → ${next.width}×${next.height}`);
   state.log.replaceMask(state, label, next, refreshDisplay);
+  derivedCache = null;
   return next;
 }
 
@@ -242,8 +295,25 @@ function callWorker(
   const id = ++reqId;
   dbg('worker', `→ ${msg.type} id=${id} · pending will be ${pending.size + 1}`,
     msg.type === 'segment' ? { w: msg.w, h: msg.h } : msg.type === 'recompute' ? { bbox: msg.bbox } : undefined);
+  // Watchdog. `failAllPending` covers onerror/onmessageerror, but nothing
+  // covers a request that is simply never answered — an ORT hang, a
+  // postMessage dropped by a throttled background tab, or a worker-side `busy`
+  // latch left set because an earlier segment never settled. The await then
+  // never resolves, so the caller's `finally { stopScan() }` never runs,
+  // scanBusy latches, and every editing guard refuses forever with only a
+  // ticking clock as evidence.
+  const budgetMs = msg.type === 'init' ? 180_000 : 900_000;
   return new Promise((resolve, reject) => {
-    pending.set(id, { resolve, reject, onProgress });
+    const timer = window.setTimeout(() => {
+      if (!pending.has(id)) return;
+      dbgWarnLog('worker', `request id=${id} (${msg.type}) exceeded ${budgetMs}ms — treating the worker as wedged`);
+      failAllPending('The inference worker stopped responding — reload the page to retry');
+    }, budgetMs);
+    pending.set(id, {
+      resolve: (v) => { clearTimeout(timer); resolve(v); },
+      reject: (e) => { clearTimeout(timer); reject(e); },
+      onProgress,
+    });
     sentAt.set(id, now());
     worker.postMessage({ ...msg, id }, transfer ?? []);
   });
@@ -268,8 +338,8 @@ function setBar(frac: number | null, mbText: string, totalText?: string) {
   const bar = $('#prepBar') as HTMLElement;
   const track = bar.parentElement as HTMLElement | null;
   const determinate = frac !== null;
-  dbgThrottled('prep', `setBar ${determinate ? `${(frac! * 100).toFixed(1)}%` : 'indeterminate'} · "${mbText}"`, 1000,
-    totalText !== undefined ? { total: totalText } : undefined);
+  dbgThrottled('prep', `setBar ${determinate ? 'determinate' : 'indeterminate'}`, 1000,
+    { pct: determinate ? frac!.toFixed(4) : null, mb: mbText, total: totalText ?? null });
   if (determinate) {
     const pct = Math.min(100, Math.max(0, frac! * 100));
     bar.style.width = `${pct}%`;
@@ -731,9 +801,63 @@ function drawOriginal(target: HTMLCanvasElement, img: ImageRef) {
  *  late worker result is discarded instead of popping the editor open. */
 let prepToken = 0;
 
+/** Session epoch, bumped whenever `state.image` is REPLACED. A separate token
+ *  from prepToken because it guards a different thing: prepToken cancels a RUN,
+ *  this guards the IDENTITY of the session a continuation writes into.
+ *
+ *  `state` is one long-lived object, so a continuation that captured
+ *  `state.image` before an await can install a result belonging to the previous
+ *  image into the current session. That produced two distinct failures: a stale
+ *  mask landing beside a different image (after which composite() throws on every
+ *  animation frame, from inside rAF), and strokes painted on image A being
+ *  applied to image B's mask. Every await that resumes and then writes to
+ *  `state` compares its epoch and bails if it moved. */
+let sessionEpoch = 0;
+
+/** Feedback-bubble timers. Held so a session change can cancel them: #fb is a
+ *  body-level child, so an untracked timer pops it over whatever view is up. */
+const fbTimers: number[] = [];
+
+/** Begin a new editing session. Clears module-level per-session state that
+ *  `state.log = new OpLog()` does not cover — notably the pending brush strokes,
+ *  which are module state and would otherwise be applied to the next image. */
+function newSession(): void {
+  sessionEpoch++;
+  clearOverlay();
+  for (const t of fbTimers) clearTimeout(t);
+  fbTimers.length = 0;
+  $('#fb')?.classList.remove('on');
+}
+
+/** Guards `realLoadFile`: the landing view stays live during the async decode,
+ *  so a second file can be picked before the first finishes resolving. */
+let loadToken = 0;
+
+/** Load the bundled demo photo. "Try a sample" used to call startPreparing(true),
+ *  but the `withDemo` argument was ignored, so the CTA could only ever toast
+ *  "Pick an image first". This makes the button real, using the sample that
+ *  already ships in `public/`. */
+async function loadSample(): Promise<boolean> {
+  dbg('ingest', 'loadSample — fetching the bundled demo image');
+  const url = new URL('sample-before.png', document.baseURI).href;
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const blob = await res.blob();
+    if (!blob.type.startsWith('image/')) throw new Error(`unexpected type ${blob.type || 'none'}`);
+    await realLoadFile(new File([blob], 'sample.png', { type: blob.type }));
+    return true;
+  } catch (e) {
+    dbgWarnLog('ingest', 'sample load failed', String(e));
+    W.toast('Could not load the sample image — pick a file instead', true);
+    return false;
+  }
+}
+
 async function realLoadFile(f: File) {
   dbg('ingest', `loadFile "${f.name}" · ${(f.size / 1048576).toFixed(2)} MB · type=${f.type || 'unknown'}`);
   if (!f.type.startsWith('image/')) { W.toast('Not an image file', true); return; }
+  const my = ++loadToken;
   // Reset the picker so re-selecting the SAME file still fires change.
   const picker = $('#fileInput') as HTMLInputElement | null;
   if (picker) picker.value = '';
@@ -741,6 +865,11 @@ async function realLoadFile(f: File) {
     const t0 = now();
     const ref = await decodeToImageRef(f, f.name);
     dbg('ingest', `decoded in ${(now() - t0).toFixed(0)}ms → ${ref.width}×${ref.height} (${(ref.rgb.length / 3 / 1e6).toFixed(2)} M px)`);
+    // A newer file won the race while we were decoding: last-to-PICK must win,
+    // not last-to-resolve. Two overlapping decodes used to resolve in arbitrary
+    // order and silently install the wrong image as the session.
+    if (my !== loadToken) { dbg('ingest', `load superseded (my=${my} token=${loadToken}) — discarding`); return; }
+    newSession();
     state.image = ref;
     state.mask = null;
     state.removeBg = false;
@@ -752,6 +881,12 @@ async function realLoadFile(f: File) {
     $('#dimLbl').textContent = `${ref.width} × ${ref.height}`;
     ensureCanvases(ref);
     if (!finishingWired) { wireFinishing(); finishingWired = true; }
+    // openBatchItem resets these too. Without it the SECOND file opened through
+    // the normal path inherits the first one's finishing state: a subject
+    // translate of 800px off-frame, a retained background ImageRef, and slider
+    // labels that no longer describe the image.
+    resetSessionParams();
+    syncFxControls();
     // resetExportRes() ends in refreshExpDims(), which owns #expDims.
     resetExportRes();
     W.startPreparing(false);
@@ -777,10 +912,18 @@ async function segmentCurrent(): Promise<AlphaMask> {
   return { width: res.w, height: res.h, alpha: new Float32Array(res.alpha) };
 }
 
-async function realStart(_withDemo: boolean) {
-  dbg('flow', `realStart(withDemo=${_withDemo}) for ${state.image ? `${state.image.width}×${state.image.height}` : 'no image'}`);
+async function realStart(withDemo: boolean) {
+  dbg('flow', `realStart(withDemo=${withDemo}) for ${state.image ? `${state.image.width}×${state.image.height}` : 'no image'}`);
+  if (!state.image && withDemo) {
+    // "Try a sample": load the bundled demo, then carry on with this run.
+    // Previously the flag was ignored, so the button could only ever say
+    // "Pick an image first".
+    const ok = await loadSample();
+    if (!ok || !state.image) { W.showView('view-landing'); return; }
+  }
   if (!state.image) { W.toast('Pick an image first', true); W.showView('view-landing'); return; }
   const my = ++prepToken;
+  const myEpoch = sessionEpoch;
   W.showView('view-preparing');
   ($('#prepRing') as HTMLElement).style.display = 'block';
   ($('#prepError') as HTMLElement)?.classList.add('hidden');
@@ -816,24 +959,36 @@ async function realStart(_withDemo: boolean) {
     stopElapsed();
     const label = backendLabel();
     W.showView('view-editor');
-    lastCompare = 'after';
-    W.compareMode = 'after';
+    setCompareMode('after');
     // No mask yet, so the editor shows the original — the cutout arrives when
     // the worker returns.
     startScan(`Removing background on-device (${label})…`);
     refreshDisplay();
     const t0 = performance.now();
+    // Whatever happens below, the busy overlay MUST come down. An early return
+    // that skipped stopScan() latched scanBusy forever, which made isScanning()
+    // permanently true and therefore made every guardEditing() refuse — so
+    // brush, guided select and recompute all died until reload.
+    let mask: AlphaMask;
     try {
-      commitMaskSwap('ai', await segmentCurrent());
+      mask = await segmentCurrent();
     } catch (e) {
       // Put the user back on the loading card, which owns the error reporting.
-      stopScan();
       backToPreparing();
       throw e;
+    } finally {
+      stopScan();
     }
+    // Back hit mid-inference, or a new file was loaded while we segmented:
+    // discard the result. Committing it anyway is what installed a mask sized
+    // for the PREVIOUS image beside the current one, after which composite()
+    // throws on every animation frame from inside rAF.
+    if (my !== prepToken || myEpoch !== sessionEpoch) {
+      dbg('flow', `first cutout discarded (cancelled=${my !== prepToken} newSession=${myEpoch !== sessionEpoch})`);
+      return;
+    }
+    commitMaskSwap('ai', mask);
     state.removeBg = true;
-    if (my !== prepToken) return; // Back hit mid-inference: discard, don't pop the editor open
-    stopScan();
     dbgTable('flow', 'first cutout complete', {
       segmentation: `${((performance.now() - t0) / 1000).toFixed(2)}s`,
       sincePageLoad: `${((now() - startedAt) / 1000).toFixed(2)}s`,
@@ -848,10 +1003,19 @@ async function realStart(_withDemo: boolean) {
     // Reveal, don't flash: the wipe is the payoff moment after the overlay.
     runReveal();
     W.toast(`Background removed in ${((performance.now() - t0) / 1000).toFixed(1)}s · ${state.backend}`);
-    setTimeout(() => $('#fb').classList.add('on'), 2500);
+    // Both timers are session-guarded and cancellable: untracked, they popped
+    // the feedback bubble over a LATER image's editor (and over the landing page,
+    // since #fb is a body-level child), and the 14s timer could close a bubble
+    // the user was still reading.
+    const showFb = window.setTimeout(() => {
+      if (myEpoch === sessionEpoch && ($('#view-editor') as HTMLElement)?.classList.contains('on')) {
+        $('#fb').classList.add('on');
+      }
+    }, 2500);
     // The bubble overlaps the canvas: dismiss it automatically, it stays
     // one tap away via Refine if the user disagrees later.
-    setTimeout(() => $('#fb').classList.remove('on'), 14000);
+    fbTimers.push(window.setTimeout(() => $('#fb').classList.remove('on'), 14000));
+    fbTimers.push(showFb);
   } catch (e) {
     stopScan(); // idempotent; covers a failure before or after the hand-off
     if (my !== prepToken) return; // cancelled: landing is already showing
@@ -976,8 +1140,15 @@ function startScan(label: string) {
   ensureScanOverlay();
   const lbl = $('#scanLbl') as HTMLElement | null;
   if (lbl) lbl.textContent = label;
+  // The busy overlay's own label is inside a display:none element, which can
+  // never announce anything. #scanLive is the always-rendered live region.
+  const live = $('#scanLive') as HTMLElement | null;
+  if (live) live.textContent = label;
   const time = $('#scanTime') as HTMLElement | null;
   const t0 = performance.now();
+  // The clock is excluded from the live region (aria-hidden): rewriting it
+  // twice a second made a polite region announce "Working… 0:01 / 0:02 …" on
+  // every tick.
   const tick = () => {
     if (!time) return;
     const s = Math.floor((performance.now() - t0) / 1000);
@@ -1001,6 +1172,8 @@ function stopScan() {
   ($('#scan') as HTMLElement | null)?.classList.remove('on');
   const time = $('#scanTime') as HTMLElement | null;
   if (time) time.textContent = '0:00';
+  const live = $('#scanLive') as HTMLElement | null;
+  if (live) live.textContent = '';
 }
 
 /** Shared 2.5 s throttle for "you can't do that right now" toasts. */
@@ -1027,9 +1200,15 @@ function guardSplit(): boolean {
   return noteEditBlocked(`Exit ${lastCompare === 'overlay' ? 'Overlay' : 'Split'} view to edit`);
 }
 
-function realCompare(m: string) {
-  dbg('compare', `realCompare "${m}"`);
-  revealToken++;
+/** The ONE place compare mode changes.
+ *
+ *  Five separate sites used to assign `lastCompare` and `W.compareMode` by hand,
+ *  but only realCompare() also set `__rmbgSplitLock`, which the shell reads to
+ *  suppress painting and hide the brush ring. Switching away from split via the
+ *  Remove switch therefore left the lock latched: strokes were silently drawn
+ *  nowhere, while guardSplit() — which only reads lastCompare — let them
+ *  through, so they were applied to pixels the user could not see. */
+function setCompareMode(m: string): void {
   lastCompare = m;
   // Mirror into the shell's compareMode: the `B` shortcut there reads its own
   // binding to decide which way to toggle, and a module can assign to a global
@@ -1038,6 +1217,12 @@ function realCompare(m: string) {
   W.compareMode = m;
   // The shell's stage painting must stand down in every inspect-only mode.
   (W as any).__rmbgSplitLock = (m === 'split' || m === 'overlay');
+}
+
+function realCompare(m: string) {
+  dbg('compare', `realCompare "${m}"`);
+  revealToken++;
+  setCompareMode(m);
   ($('#splitUI') as HTMLElement).classList.toggle('on', m === 'split');
   $$('.seg button').forEach((b) => (b as HTMLElement).classList.toggle('on', (b as HTMLElement).dataset.view === m));
   if (!removalOn()) {
@@ -1116,13 +1301,11 @@ function afterRemovalChange() {
   // Turning removal off from a cutout view lands on Original; turning it back
   // on returns to the cutout the user was last looking at.
   if (!state.removeBg && lastCompare !== 'before') {
-    lastCompare = 'before';
-    W.compareMode = 'before';
+    setCompareMode('before');
     $$('.seg button').forEach((b) => (b as HTMLElement).classList.toggle('on', (b as HTMLElement).dataset.view === 'before'));
   }
   if (state.removeBg && lastCompare === 'before') {
-    lastCompare = 'after';
-    W.compareMode = 'after';
+    setCompareMode('after');
     $$('.seg button').forEach((b) => (b as HTMLElement).classList.toggle('on', (b as HTMLElement).dataset.view === 'after'));
   }
   refreshDisplay();
@@ -1147,8 +1330,7 @@ async function enableRemoval() {
     commitMaskSwap('ai', await segmentCurrent());
     state.removeBg = true;
     W.showView('view-editor');
-    lastCompare = 'after';
-    W.compareMode = 'after';
+    setCompareMode('after');
     refreshDisplay();
     W.toast('Background removed');
   } catch (e) {
@@ -1636,14 +1818,30 @@ function wireFinishing() {
     refreshDisplay();
     syncFxControls();
   });
+  // The colour picker fires `input` continuously while the user drags in the OS
+  // picker, and `change` once on commit. Snapshotting inside `change` therefore
+  // captured the state the `input` handler had ALREADY applied, so undo
+  // restored the colour that was on screen, reported "Undone: background
+  // color", and still consumed a slot. Arm on the gesture instead — the same
+  // pointerdown/keydown approach bindFxSlider uses — so one gesture is one
+  // entry and its pre-image is genuinely pre-mutation.
+  let bgColorArmed: ParamSnap | null = null;
+  const armBgColor = () => { bgColorArmed = snapshotParams(); };
+  num('bgColor').addEventListener('pointerdown', armBgColor);
+  num('bgColor').addEventListener('keydown', armBgColor);
+  num('bgColor').addEventListener('focus', armBgColor);
   num('bgColor').addEventListener('change', () => {
     const hex = num('bgColor').value;
     const c: [number, number, number] = [
       parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16),
     ];
-    const before = snapshotParams();
+    const before = bgColorArmed ?? snapshotParams();
+    bgColorArmed = null;
     state.bg = { kind: 'color', color: c };
     const after = snapshotParams();
+    // No-op entry: the colour is already this one, so committing would burn a
+    // history slot for nothing.
+    if (JSON.stringify(before) === JSON.stringify(after)) { refreshDisplay(); syncFxControls(); return; }
     state.log.commit('background color', () => { restoreParams(before); refreshDisplay(); }, () => { restoreParams(after); refreshDisplay(); });
     refreshDisplay();
     syncUndoRedo();
@@ -1901,15 +2099,25 @@ async function guidedApply(x: number, y: number) {
   // Grow on a downsampled copy: texture (spots, grain, fur) averages out so
   // one click selects the coherent subject, not a single spot. The grown
   // region is bilinearly upsampled back, which also softens its boundary.
-  const S = 256;
-  const s = Math.min(1, S / Math.max(img.width, img.height));
-  const dw = Math.max(8, Math.round(img.width * s)), dh = Math.max(8, Math.round(img.height * s));
+  // Aspect is preserved by the engine's own working-size helper — the same one
+  // inference uses — so this cannot drift and cannot stretch an extreme ratio.
+  // The old `Math.max(8, …)` floors turned a 4000×100 image into 256×8, so the
+  // colour threshold read a geometrically wrong picture.
+  const { w: dw, h: dh } = workingSize(img.width, img.height);
+  const s = dw / img.width;
   const small: ImageRef = {
     id: img.id + '#guided', width: dw, height: dh,
     rgb: boxDownsampleRGB(img.rgb, img.width, img.height, dw, dh),
   };
   const grown = growRegion(small, x * s, y * s);
   if (grown.box.w < 3 || grown.box.h < 3) { W.toast('No clear region there — try another spot'); return; }
+  // The cap can stop the grow mid-region, leaving a coherent-looking bbox that
+  // is really a DFS sliver. Applying that as an erase deletes the wrong pixels,
+  // so say so rather than pretending the selection is complete.
+  if (grown.truncated) {
+    W.toast('That region is too large to select in one pass — pick a smaller area', true);
+    return;
+  }
   const target = mode === 'erase' ? 0 : 1;
   const full = upsampleAlphaBilinear(grown.alpha, dw, dh, img.width, img.height);
   const { box } = grown;
@@ -2179,6 +2387,7 @@ async function openBatchItem(it: BatchItem) {
     );
     if (!ok) return;
   }
+  newSession();
   state.image = it.image;
   state.mask = it.mask
     ? { width: it.mask.width, height: it.mask.height, alpha: new Float32Array(it.mask.alpha) }
@@ -2188,9 +2397,7 @@ async function openBatchItem(it: BatchItem) {
   // pre-image: undo reported "Undone: batch", changed nothing, and burned a
   // slot (the same defect the AI entry had).
   state.log = new OpLog();
-  state.fx = JSON.parse(JSON.stringify(FX_OFF));
-  state.bg = { ...BG_TRANSPARENT };
-  state.tr = { ...TR_IDENTITY };
+  resetSessionParams();
   // A finished batch item opens showing its cutout; an unprocessed one opens on
   // the original, and its switch is live so one tap segments it.
   state.removeBg = state.mask !== null;
@@ -2205,10 +2412,10 @@ async function openBatchItem(it: BatchItem) {
   resetExportRes();
   W.showView('view-editor');
   if (state.mask) {
-    lastCompare = 'after';
+    setCompareMode('after');
     refreshDisplay();
   } else {
-    lastCompare = 'before';
+    setCompareMode('before');
     up.style.display = 'block';
     if (resultCanvas) resultCanvas.style.display = 'none';
     syncUndoRedo();
@@ -2362,17 +2569,32 @@ const batchPicker = (() => {
 // There is exactly one such action today (opening a batch item replaces the
 // editor session), so a shared promise-based helper is enough; no framework.
 let confirmResolve: ((v: boolean) => void) | null = null;
+/** Element focused before the dialog opened, restored on close. */
+let confirmPrevFocus: HTMLElement | null = null;
 
 function confirmAction(title: string, body: string, okLabel = 'Discard'): Promise<boolean> {
+  // Only one dialog exists. A second caller arriving mid-flight (two batch
+  // thumbnails clicked in quick succession) used to overwrite the pending
+  // resolver, orphaning the first promise forever — that await never settled,
+  // so the first click silently did nothing and the user had no idea which
+  // item they had just opened.
+  if (confirmResolve) return Promise.resolve(false);
   ($('#confirmTitle') as HTMLElement).textContent = title;
   ($('#confirmBody') as HTMLElement).textContent = body;
   const ok = $('#confirmOk') as HTMLButtonElement;
   ok.textContent = okLabel;
-  ok.classList.toggle('danger', true);
+  // `danger` must REPLACE `primary`, not sit alongside it. `.btn.primary:hover`
+  // and `.btn.danger:hover` have equal specificity and only `primary` declares
+  // a background, so leaving both made the destructive confirm render mint
+  // green on hover with white text — exactly the "reads as go" failure the
+  // markup comment says must be impossible.
+  ok.classList.remove('primary');
+  ok.classList.add('danger');
   ($('#confirmWrap') as HTMLElement).classList.add('on');
   // Focus the safe choice, so Enter/Escape can never destroy work by accident.
   const cancel = document.querySelector('#confirmWrap [data-no-confirm]:not(.scrim)') as HTMLElement | null;
   cancel?.focus();
+  confirmPrevFocus = (document.activeElement as HTMLElement | null) ?? null;
   return new Promise<boolean>((resolve) => { confirmResolve = resolve; });
 }
 
@@ -2380,6 +2602,11 @@ function closeConfirm(result: boolean) {
   ($('#confirmWrap') as HTMLElement).classList.remove('on');
   const r = confirmResolve;
   confirmResolve = null;
+  // Restore focus to whatever opened the dialog. Without this, keyboard users
+  // are dropped to <body> and lose their place in the editor entirely.
+  const back = confirmPrevFocus;
+  confirmPrevFocus = null;
+  if (back && back.isConnected) back.focus();
   r?.(result);
 }
 
@@ -2574,8 +2801,13 @@ $('#btnRecompute').addEventListener('click', () => { void rerun(); });
   renderBatch(); // clear the mockup's toy tiles on boot
 }
 function syncUndoRedo() {
-  ( $('#btnUndo') as HTMLButtonElement).disabled = !state.log.canUndo || !state.mask;
-  ( $('#btnRedo') as HTMLButtonElement).disabled = !state.log.canRedo || !state.mask;
+  ( $('#btnUndo') as HTMLButtonElement).disabled = !state.log.canUndo;
+  // Deliberately NOT gated on state.mask. `replaceMask` stores null as the
+  // pre-image of the first AI removal, so undoing that clears the mask — and
+  // the old `|| !state.mask` then disabled Redo, making the cutout
+  // unreachable except by re-running inference (seconds on GPU, minutes on
+  // WASM). The click handler and renderDisplay already tolerate no mask.
+  ( $('#btnRedo') as HTMLButtonElement).disabled = !state.log.canRedo;
 }
 
 // Real undo/redo over the operation log (the mockup shell binds mock
@@ -2588,7 +2820,9 @@ function syncUndoRedo() {
   syncUndoRedo();
 };
 ($('#btnRedo') as HTMLButtonElement).onclick = () => {
-  if (!state.mask) return;
+  // No `!state.mask` bail here — see syncUndoRedo(). Redo's whole job is to
+  // bring a mask BACK, so refusing to run without one made it impossible to
+  // undo-then-redo the first AI removal, which is exactly the common case.
   const label = state.log.redo();
   if (label) { refreshDisplay(); W.toast(`Redone: ${label}`); }
   syncUndoRedo();
@@ -2602,7 +2836,15 @@ function syncUndoRedo() {
 // to exercise the cold-download path when testing).
 if (!new URLSearchParams(location.search).has('noprefetch')) {
   callWorker({ type: 'init' }).then(
-    (res) => { state.backend = res.backend ?? 'cached'; },
+    () => {
+      // Deliberately NOT writing state.backend here. This prefetch reports the
+      // init-time backend, which the adapter can invalidate mid-segment when it
+      // falls back to WASM — and the prefetch resolves later than a short
+      // segmentation started after it. Writing it back made the UI claim WebGPU
+      // while running on the CPU. `ensureReady` and `adoptBackend` are the only
+      // owners of that value.
+      dbg('flow', 'warm-up init complete (backend adopted on first real use)');
+    },
     () => { /* first real use will surface the error with UI */ },
   );
 }

@@ -2,7 +2,14 @@
 // the main thread stays responsive (progress, zoom/pan, cancel-safe).
 // No DOM in this file: engine + adapter only. Everything stays on-device;
 // the worker fetches model bytes into the same browser cache as the page.
-import { TransformersAdapter, createEngine, dbg, dbgTable, now, type ImageRef } from '@rmbg/engine';
+import {
+  TransformersAdapter,
+  dbg,
+  dbgTable,
+  now,
+  removeBackground,
+  type ImageRef,
+} from '@rmbg/engine';
 import { MODEL_ID } from './model-config';
 
 // This module instance has its own clock (the log module is loaded fresh in
@@ -11,7 +18,6 @@ import { MODEL_ID } from './model-config';
 dbg('wk', `worker module evaluated · model=${MODEL_ID} · base=${location.origin}`);
 
 const adapter = new TransformersAdapter(MODEL_ID, { device: 'auto' });
-const engine = createEngine(adapter);
 let busy = false;
 
 self.onmessage = async (e: MessageEvent) => {
@@ -57,7 +63,7 @@ self.onmessage = async (e: MessageEvent) => {
         height: msg.h,
         rgb: new Uint8ClampedArray(msg.rgb),
       };
-      const mask = await engine.removeBackground(image, { hint: 'auto', tier: 'fast' });
+      const mask = await removeBackground(adapter, image);
       // Report the backend THIS call actually used. The adapter can fall back
       // from WebGPU to WASM mid-segment when execution fails, so the backend
       // from init time is stale by the time a result exists — and a UI still
@@ -98,7 +104,7 @@ self.onmessage = async (e: MessageEvent) => {
       const mask = {
         width: msg.mw, height: msg.mh, alpha: new Float32Array(msg.alpha),
       };
-      const next = await adapter.recomputeRegion(image, mask, msg.bbox, { hint: 'auto' });
+      const next = await adapter.recomputeRegion(image, mask, msg.bbox);
       (self as any).postMessage(
         {
           id: msg.id, type: 'mask', w: next.width, h: next.height,
