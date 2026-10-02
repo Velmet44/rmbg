@@ -109,6 +109,20 @@ review rounds are green.
 | The shell's duplicate `#btnRecompGo` handler (which started the overlay a second time) is gone; `main.ts` owns that flow. | single owner |
 | `prefers-reduced-motion` stops the sweep and the pulsing dot but keeps the clock, so reduced-motion users retain the "still working" signal. | CSS media query |
 
+## Overlay toning-down, canvas hand-off, honest percentages (2026-10-02)
+
+23 targeted checks plus a 19-check consolidated regression are green.
+
+| Fix | Evidence |
+|---|---|
+| **Overlay toned down.** The bloom was the loud part: a 2px line with two stacked glows (`0 0 16px` + `0 0 46px`), a 30%-wide green gradient band, green scanlines and a green chip border with a drop shadow. Now a 1px hairline with one `0 0 5px` shadow, a 26% trail at ≤.09 alpha, neutral `rgba(255,255,255,.03)` scanlines, a neutral chip border and no drop shadow. The sweep also slowed 2.1s → 2.6s. | line `1px`; single `rgba(52,211,153,0.22) 0px 0px 5px`; chip border `rgba(255,255,255,0.08)`, shadow `none`; scanlines `rgba(255,255,255,0.03)`; veil `rgba(8,9,11,0.2)`; `2.6s` |
+| The chip dot still glowed: a global `.dot` rule sets `box-shadow:0 0 8px var(--accent)` and my override missed it. Explicitly reset to `none`, and the expanding ring replaced by a calm 2.4 s opacity fade. | computed `box-shadow: none`, `animation-name: softPulse` |
+| **Hand-off to the canvas.** The loading card used to hold the user through segmentation, showing a progress bar for work whose result they could already see on the image. Now, the moment the model is ready, the app switches to the editor and shows the progress overlay over the user's own photo; the loading card is reserved for download/session phases. | `view-editor on + #scan on`, `view-preparing off`, label `Removing background on-device (GPU)…` |
+| A segmentation failure after the hand-off returns to the loading card, which owns error reporting, and clears the overlay. | model-load failure: `preparing=true, scan=false`, `#prepError` shown |
+| A finished result is never stranded: `showView('view-editor')` is re-asserted after the await, since Back is no longer the preparing screen's cancel button. | after releasing the mask: editor on, mask set, `removeBg` true |
+| **Percentages are now real.** The old screen invented them: weights mapped onto the first 60% of the bar "because session build and inference follow", then 3%/5% for the runtime, 50% or 65% for session build, 85% before inference. `setBar(frac \| null)` now shows a percentage only for measured bytes; every other phase is indeterminate (shimmer, no number). | 41 MB of 98 MB → label `42%`, bar `41.8367%` (the true fraction); indeterminate phases show `pct=""` and `shimmer=true` |
+| The `·` separator moved inside `#prepPctWrap` so an indeterminate phase shows only its phase text instead of a dangling `·`. | `prepPctWrap display=none` when indeterminate |
+
 ## PENDING (need adequate hardware: real GPU or stronger CPU)
 
 - In-browser cold/warm inference numbers for the quality tier.

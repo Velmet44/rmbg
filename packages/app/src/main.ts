@@ -215,19 +215,48 @@ function callWorker(
 
 // ---------- helpers ----------
 
-function setBar(frac: number, mbText: string, totalText?: string) {
-  ($('#prepBar') as HTMLElement).style.width = `${Math.min(100, Math.max(0, frac * 100))}%`;
+/**
+ * Loading-screen progress.
+ *
+ * `frac === null` means INDETERMINATE: we genuinely do not know how far along
+ * we are (the runtime ESM fetch emits no byte events, ORT session construction
+ * has no progress API, and a single-shot segmentation has no intermediate
+ * steps). Those phases shimmer and show no percentage.
+ *
+ * The old version invented numbers — it mapped the weights download onto the
+ * first 60% of the bar, then jumped to 50% for "session build", 65% after it,
+ * and 85% before inference. None of those were measurements. Now a percentage
+ * appears only when it is `loaded / total` for real bytes.
+ */
+function setBar(frac: number | null, mbText: string, totalText?: string) {
+  const bar = $('#prepBar') as HTMLElement;
+  const track = bar.parentElement as HTMLElement | null;
+  const determinate = frac !== null;
+  if (determinate) {
+    const pct = Math.min(100, Math.max(0, frac! * 100));
+    bar.style.width = `${pct}%`;
+    // Only a determinate bar earns a fill; an indeterminate one stays empty and
+    // shimmers, so the two states are never confused.
+    $('#prepPct').textContent = `${Math.round(pct)}%`;
+  } else {
+    bar.style.width = '0%';
+    $('#prepPct').textContent = '';
+  }
+  track?.classList.toggle('shimmer', !determinate);
+  // The "·" separator lives with the percentage, so an indeterminate phase
+  // shows just the phase text rather than a dangling separator.
+  const pctWrap = $('#prepPctWrap') as HTMLElement | null;
+  if (pctWrap) pctWrap.style.display = determinate ? '' : 'none';
   $('#prepMB').textContent = mbText;
-  $('#prepPct').textContent = `${Math.round(frac * 100)}%`;
   // The "/ total" segment only exists when a total is known (determinate
   // download). Otherwise it hides, so cached runs never show a dangling "/ …".
-  const wrap = $('#prepTotalWrap') as HTMLElement | null;
+  const totalWrap = $('#prepTotalWrap') as HTMLElement | null;
   const t = $('#prepTotal') as HTMLElement | null;
-  if (totalText !== undefined && t && wrap) {
+  if (totalText !== undefined && t && totalWrap) {
     t.textContent = totalText;
-    wrap.style.display = '';
-  } else if (wrap) {
-    wrap.style.display = 'none';
+    totalWrap.style.display = '';
+  } else if (totalWrap) {
+    totalWrap.style.display = 'none';
   }
 }
 
@@ -279,9 +308,11 @@ function makeInitProgress() {
   const draw = () => {
     let l = 0, t = 0;
     for (const f of bytes.values()) { l += f.loaded; t += f.total; }
-    // Download occupies the first 60%: session build + inference follow,
-    // so the bar must never read 100% before the work is done.
-    if (t > 0) setBar((l / t) * 0.6, `${fmtMB(l)}`, `${fmtMB(t)} · cached after first visit`);
+    // Real bytes over a real total. The old code scaled this into the first
+    // 60% of the bar "because session build and inference follow", which made
+    // every number on this screen a guess. A determinate bar now means
+    // exactly `loaded / total` and nothing else.
+    if (t > 0) setBar(l / t, `${fmtMB(l)}`, `${fmtMB(t)} · cached after first visit`);
   };
   // Stall reporter (informational only — never changes state).
   // Covers three silences distinctly: runtime fetch, queued-but-no-bytes,
@@ -291,26 +322,29 @@ function makeInitProgress() {
     if (finished) return;
     const idle = Date.now() - lastEventAt;
     if (!sawDownload && pendingFiles.size > 0 && firstInitiateAt > 0 && Date.now() - firstInitiateAt > 30000 && idle > 10000) {
-      setBar(0.03, `waiting for bytes… (${pendingFiles.size} file(s) queued, connection slow?)`);
+      setBar(null, `waiting for bytes… (${pendingFiles.size} file(s) queued, connection slow?)`);
     } else if (sawDownload && !stallNoted && idle > 20000) {
       stallNoted = true;
-      setBar(0.05, 'download stalled — connection may be slow, still trying…');
+      // A stall means we genuinely lost the flow of bytes, so the percentage is
+      // withheld rather than left frozen at a number that no longer holds.
+      setBar(null, 'download stalled — connection may be slow, still trying…');
     }
   }, 5000);
   // Session build starts after the last file resolves (downloaded or cached)
   // and emits no byte events, so announce it on a short debounce: a new
   // initiate/download/progress arriving first cancels it (files can resolve
-  // interleaved). Without this the cached path sits at 0% for ~12s with no UI.
+  // interleaved). Without this the cached path sits with no UI for ~12s.
+  // Indeterminate: ORT session construction reports no progress, so any
+  // percentage here would be invented.
   let buildTimer: number | null = null;
   const queueBuildNote = () => {
     if (buildTimer !== null) clearTimeout(buildTimer);
     buildTimer = window.setTimeout(() => {
       buildTimer = null;
       if (finished || pendingFiles.size > 0) return;
-      setBar(
-        sawDownload ? 0.65 : 0.5,
-        sawDownload ? 'download complete — loading into memory…' : 'cached model found — loading into memory…',
-      );
+      setBar(null, sawDownload
+        ? 'download complete — building the model session…'
+        : 'cached model found — building the model session…');
     }, 600);
   };
   return {
@@ -319,7 +353,9 @@ function makeInitProgress() {
       lastEventAt = Date.now();
       if (p.status !== 'done' && buildTimer !== null) { clearTimeout(buildTimer); buildTimer = null; }
       if (p.status === 'runtime') {
-        setBar(0.03, 'Loading AI engine… (one-time code download)');
+        // The runtime is a dynamic import(): no byte events are observable, so
+        // this phase is honestly indeterminate rather than a made-up 3%.
+        setBar(null, 'Loading AI engine… (one-time code download)');
       } else if (p.status === 'initiate') {
         if (firstInitiateAt === 0) firstInitiateAt = Date.now();
         pendingFiles.add(p.file);
@@ -330,10 +366,10 @@ function makeInitProgress() {
           bytes.set(p.file, { loaded: p.loaded ?? 0, total: p.total });
           draw();
         } else {
-          // Chunked response without content-length: show bytes flowing and
-          // keep the bar indeterminate (CSS shimmer) rather than frozen 0%.
+          // Chunked response without content-length: bytes are flowing but the
+          // total is unknown, so no percentage is possible — indeterminate.
           stallNoted = false;
-          setBar(0.05, `${fmtMB(p.loaded ?? 0)} downloaded…`);
+          setBar(null, `${fmtMB(p.loaded ?? 0)} downloaded…`);
         }
       } else if (p.status === 'done') {
         pendingFiles.delete(p.file);
@@ -643,34 +679,61 @@ async function realStart(_withDemo: boolean) {
   ($('#prepRing') as HTMLElement).style.display = 'block';
   ($('#prepError') as HTMLElement)?.classList.add('hidden');
   $('#prepTitle').textContent = 'Preparing local AI…';
-  setBar(0, 'Checking cache…');
+  setBar(null, 'Checking cache…');
+  // From here on the segment phase runs on the CANVAS with the progress overlay,
+  // so the preparing screen's own elapsed clock is done.
+  let handedOff = false;
+  const backToPreparing = () => {
+    if (!handedOff) return;
+    handedOff = false;
+    W.showView('view-preparing');
+  };
   try {
     // Real cache verdict (Cache API), never a timing guess: the label must
     // not claim "cached" unless the files are actually there.
     if (await isModelCached()) {
       $('#prepTitle').textContent = 'Model cached — loading…';
-      setBar(0, 'found in this browser, no download needed');
+      setBar(null, 'found in this browser, no download needed');
     } else {
-      setBar(0, 'Downloading model… (one-time, ~98 MB)');
+      setBar(null, 'Downloading model… (one-time, ~98 MB)');
     }
     startElapsed('working');
+    // Model load (runtime + weights + session). Indeterminate unless bytes.
     await ensureReady();
     if (my !== prepToken) return; // Back hit mid-init: warm session stays, but show nothing
-    $('#prepTitle').textContent = 'Removing background…';
+    // ---- Hand off: everything that can still take a long time (the actual
+    // segmentation) belongs on the canvas, not on a loading card. The user sees
+    // their own photo with the progress overlay instead of a progress bar for
+    // something they cannot see.
+    handedOff = true;
+    stopElapsed();
     const backendLabel = state.backend.startsWith('webgpu') ? 'GPU'
       : state.backend.startsWith('wasm') ? 'CPU' : state.backend;
-    setBar(0.85, `model ready — removing background on-device (${backendLabel})`);
-    const t0 = performance.now();
-    commitMaskSwap('ai', await segmentCurrent());
-    state.removeBg = true;
-    if (my !== prepToken) return; // Back hit mid-inference: discard, don't pop the editor open
-    stopElapsed();
-    setBar(1, 'done');
     W.showView('view-editor');
     lastCompare = 'after';
+    W.compareMode = 'after';
+    // No mask yet, so the editor shows the original — the cutout arrives when
+    // the worker returns.
+    startScan(`Removing background on-device (${backendLabel})…`);
     refreshDisplay();
-    // Reveal, don't flash: the editor opens on the original and wipes to
-    // the cutout. The wipe itself is the processing feedback (no spinner).
+    const t0 = performance.now();
+    try {
+      commitMaskSwap('ai', await segmentCurrent());
+    } catch (e) {
+      // Put the user back on the loading card, which owns the error reporting.
+      stopScan();
+      backToPreparing();
+      throw e;
+    }
+    state.removeBg = true;
+    if (my !== prepToken) return; // Back hit mid-inference: discard, don't pop the editor open
+    stopScan();
+    // The user can leave the editor while this runs (Back is not the preparing
+    // screen's cancel button any more), so re-assert the view: a finished
+    // result is always shown rather than stranded on a hidden canvas.
+    W.showView('view-editor');
+    refreshDisplay();
+    // Reveal, don't flash: the wipe is the payoff moment after the overlay.
     runReveal();
     W.toast(`Background removed in ${((performance.now() - t0) / 1000).toFixed(1)}s · ${state.backend}`);
     setTimeout(() => $('#fb').classList.add('on'), 2500);
@@ -678,14 +741,16 @@ async function realStart(_withDemo: boolean) {
     // one tap away via Refine if the user disagrees later.
     setTimeout(() => $('#fb').classList.remove('on'), 14000);
   } catch (e) {
+    stopScan(); // idempotent; covers a failure before or after the hand-off
     if (my !== prepToken) return; // cancelled: landing is already showing
+    backToPreparing();
     stopElapsed();
     const msg = String((e as Error)?.message ?? e);
     $('#prepTitle').textContent = 'Could not start the local model';
     ($('#prepRing') as HTMLElement).style.display = 'none';
     // Error gets its own line — the MB line keeps neutral progress state
-    // instead of a 300-char message beside a stale total and 0%.
-    setBar(0, 'failed');
+    // instead of a 300-char message beside a stale total and a stale percentage.
+    setBar(null, 'failed');
     const errEl = $('#prepError') as HTMLElement | null;
     if (errEl) {
       errEl.textContent = msg.slice(0, 300);

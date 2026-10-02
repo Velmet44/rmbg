@@ -41,6 +41,13 @@
   relocated into `#checker` at runtime so it tracks zoom/pan; the markup ships
   it as a sibling of `#viewport`, where `inset:0` covered the whole stage.
   Anything awaiting the worker must sit in a `try/finally { stopScan() }`.
+- `setBar(frac | null)`: `null` means indeterminate. A percentage may only be
+  shown for measured bytes — the runtime fetch, session build and segmentation
+  emit none, so they shimmer with a label instead. Do not reintroduce invented
+  fractions.
+- The loading card covers download + session build only. Once `ensureReady()`
+  resolves, `realStart` hands off to the editor and the canvas overlay takes
+  over; failures return to the card via `backToPreparing()`.
 - The app has ONE editing session (`state`). Anything that replaces it (opening
   a batch item) destroys the mask, the whole `OpLog`, the finishing params and
   the previous preview URL, with no undo. Route it through `confirmAction()`.
