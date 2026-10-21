@@ -52,7 +52,7 @@ what was and was not actually measured.
 - Masks are float alpha (hair and semi-transparency survive); the original pixels are never mutated
 - One swappable `SegmentationAdapter`; the engine is pure TypeScript with a DOM-free unit suite
 - Inference runs in a Web Worker, so the page stays interactive during a long CPU pass
-- No image-processing backend: photos stay on-device. The site uses GoatCounter for aggregate page views and fixed app events (model readiness, inference/recompute and export outcomes, and optional feedback votes), plus page/referrer, browser, approximate-location, and screen-size metadata. No image pixels, filenames, or dimensions are sent. See the [analytics FAQ](https://velmet44.github.io/rmbg/#faq).
+- No image-processing backend: photos stay on-device. The site uses GoatCounter for aggregate page views and fixed app events (model readiness, inference/recompute and export outcomes, and optional feedback votes), plus page/referrer, browser, approximate-location, and screen-size metadata. No image pixels, filenames, or dimensions are sent. See the [analytics FAQ](https://velmet44.github.io/rmbg/#faq) and the [public aggregate dashboard](https://velmet.goatcounter.com/) (updated hourly).
 - First visit fetches two things from third parties, both code and weights and never your image: the pinned Transformers.js runtime bundle (jsDelivr) and the model weights (Hugging Face). After that, both are cached
 
 Model provenance (revisions, licenses, checksums): [models/manifest.json](models/manifest.json).

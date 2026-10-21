@@ -44,6 +44,16 @@ describe('boot', () => {
     expect(app.document.title).toBe(title);
   });
 
+  it('links the analytics FAQ to the public aggregate dashboard', () => {
+    const link = app.document.querySelector(
+      '#faq a[href="https://velmet.goatcounter.com/"]',
+    ) as HTMLAnchorElement | null;
+    expect(link).toBeTruthy();
+    expect(link?.textContent).toContain('public GoatCounter stats');
+    expect(link?.target).toBe('_blank');
+    expect(link?.rel).toContain('noopener');
+  });
+
   it('constructs exactly one inference worker and prefetches with an init message', () => {
     expect(app.workers).toHaveLength(1);
     const [worker] = app.workers;
