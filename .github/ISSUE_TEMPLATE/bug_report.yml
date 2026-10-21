@@ -1,0 +1,52 @@
+name: Bug report
+description: Report something that is broken or behaving unexpectedly.
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this. Please do not attach private photos,
+        exported images, filenames, or other personal data. The app's **Report an issue**
+        action can create a draft with technical diagnostics and no image pixels.
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened?
+      description: A short description of the problem.
+      placeholder: What did you see?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Include the smallest set of steps that reproduces the issue, if known.
+      placeholder: |
+        1. Open the live app
+        2. Choose a sample image
+        3. ...
+    validations:
+      required: false
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What did you expect to happen?
+    validations:
+      required: false
+  - type: input
+    id: environment
+    attributes:
+      label: Browser, device, and operating system
+      description: Add versions if you know them. Do not include identifying device names.
+      placeholder: Firefox 140, Windows 11; or Safari on iPhone
+    validations:
+      required: true
+  - type: textarea
+    id: errors
+    attributes:
+      label: Error message or other useful details
+      description: Remove personal information, paths, and tokens before posting.
+    validations:
+      required: false

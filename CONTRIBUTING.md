@@ -116,6 +116,9 @@ The [PR template](.github/PULL_REQUEST_TEMPLATE.md) is intentionally short;
 remove sections that do not apply. CI will report automated failures, and
 reviewers can help with follow-up fixes.
 
+For suspected security vulnerabilities, follow [SECURITY.md](SECURITY.md)
+instead of opening a public issue.
+
 ## Privacy, assets, and models
 
 - Never commit secrets, credentials, local environment files, private photos,

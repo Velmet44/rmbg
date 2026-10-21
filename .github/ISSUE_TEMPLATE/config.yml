@@ -1,1 +1,8 @@
 blank_issues_enabled: true
+contact_links:
+  - name: Try the live app
+    url: https://velmet44.github.io/rmbg
+    about: Process a sample or your own image locally in your browser.
+  - name: Read the contribution guide
+    url: https://github.com/Velmet44/rmbg/blob/main/CONTRIBUTING.md
+    about: Setup, tests, benchmark reports, and how to open a PR.
