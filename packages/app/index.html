@@ -14,11 +14,11 @@
 <meta property="og:url" content="https://velmet44.github.io/rmbg" />
 <meta property="og:title" content="RMBG — Remove backgrounds on your device" />
 <meta property="og:description" content="Free, open-source background remover that runs entirely in your browser. No upload, no account, no watermark." />
-<meta property="og:image" content="https://velmet44.github.io/rmbg/sample-after.png" />
+<meta property="og:image" content="https://velmet44.github.io/rmbg/sample-split.png" />
 <meta name="twitter:card" content="summary_large_image" />
 <meta name="twitter:title" content="RMBG — Remove backgrounds on your device" />
 <meta name="twitter:description" content="Free, open-source background remover that runs entirely in your browser. No upload, no account, no watermark." />
-<meta name="twitter:image" content="https://velmet44.github.io/rmbg/sample-after.png" />
+<meta name="twitter:image" content="https://velmet44.github.io/rmbg/sample-split.png" />
 <link rel="icon" href="data:," />
 <style>
   :root{
@@ -113,18 +113,32 @@
   .checklist{margin-top:44px;display:flex;gap:16px;flex-wrap:wrap;justify-content:center;
     color:var(--muted);font-size:12.5px}
   .checklist b{color:var(--accent);margin-right:5px}
-  .example{margin-top:44px;display:flex;gap:14px;align-items:stretch;flex-wrap:wrap;justify-content:center}
+  /* Before/after as ONE split render rather than two thumbnails: the point is
+     that the two halves are the same frame, which two separate images cannot
+     show. Height is unconstrained so the image keeps its aspect ratio — cropping
+     a comparison vertically would cut the subject out of the evidence. */
+  .example{margin-top:40px;display:flex;gap:14px;align-items:stretch;flex-wrap:wrap;justify-content:center}
   .example figure{width:220px;border:1px solid var(--border);border-radius:12px;overflow:hidden;background:var(--panel)}
-  .example figcaption{font-size:11px;color:var(--muted);padding:8px 10px;letter-spacing:.08em;font-weight:700}
+  .example figure.split{width:min(470px,100%)}
+  .example figcaption{font-size:11px;color:var(--muted);padding:9px 11px;letter-spacing:.02em;line-height:1.5}
   .example .img{height:200px;display:flex;align-items:center;justify-content:center}
+  .example figure.split .img{height:auto;display:block;position:relative;background:#1c232b}
+  .example figure.split img{display:block;width:100%;height:auto}
+  /* Corner labels over the image. The same pill treatment the editor's split
+     view uses, so the landing page shows the product's own vocabulary. */
+  .example .tag{position:absolute;top:10px;font-size:10px;font-weight:800;letter-spacing:.1em;
+    background:rgba(0,0,0,.62);border:1px solid rgba(255,255,255,.13);color:var(--text);
+    padding:5px 9px;border-radius:6px;pointer-events:none;white-space:nowrap}
   /* Short viewports: squeeze further so landing + footer fit without scroll. */
   @media (max-height:820px){
     .dropzone{padding:22px 16px;margin-top:14px}
     .landing-row{margin-top:10px}
     .trust{margin-top:10px}
-    .example{margin-top:12px}
+    .example{margin-top:14px}
     .example .img{height:104px}
     .example figure{width:190px}
+    .example figure.split{width:min(330px,100%)}
+    .example figure.split .img{height:auto}
     .checklist{margin-top:10px}
     #landingFoot{padding-top:10px;padding-bottom:10px}
   }
@@ -564,17 +578,17 @@
   </div>
 
   <div class="example">
-    <figure>
-      <div class="img" style="background:#1c232b">
-        <img src="./sample-before.png" alt="Original photo: dog in a busy park" style="width:100%;height:100%;object-fit:cover;display:block" loading="lazy" />
+    <figure class="split">
+      <div class="img">
+        <img src="./sample-split.png" width="1000" height="839"
+             alt="Split comparison. Left: the original photo of a golden retriever sitting on a leaf-strewn park path. Right: the same dog with the park background removed, shown over a transparency grid." loading="lazy" />
+        <!-- Labels are HTML, not baked into the image: real type stays crisp at
+             any zoom, stays selectable and translatable, and matches the site's
+             own typography instead of fighting it. -->
+        <span class="tag" style="left:10px">Original</span>
+        <span class="tag" style="right:10px">Cutout</span>
       </div>
-      <figcaption>BEFORE</figcaption>
-    </figure>
-    <figure>
-      <div class="img" style="background:conic-gradient(#22282e 0 25%,#161b20 0 50%,#22282e 0 75%,#161b20 0);background-size:18px 18px">
-        <img src="./sample-after.png" alt="Background removed, transparent cutout" style="width:100%;height:100%;object-fit:contain;display:block" loading="lazy" />
-      </div>
-      <figcaption>AFTER</figcaption>
+      <figcaption>Same frame, both states — the background is gone, the fur edges are not</figcaption>
     </figure>
   </div>
 
