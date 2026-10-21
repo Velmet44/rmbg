@@ -116,10 +116,46 @@ describe('privacy-conscious analytics', () => {
     expect(paths).toContain('model-ready');
     expect(paths).toContain('inference-success');
     expect(paths).toContain('feedback-good');
-    expect(paths).toContain('feedback-needs-work');
+    expect(paths).not.toContain('feedback-needs-work'); // one vote per image
     expect(events.every((event) => event.event === true && event.no_session === true)).toBe(true);
     expect(events.every((event) => Object.keys(event).sort().join(',') === 'event,no_session,path')).toBe(true);
   });
+});
+
+describe('persistent per-image feedback', () => {
+  it('brings the vote back after timeout and resets it for the next image', async () => {
+    const events: Record<string, unknown>[] = [];
+    (app.window as unknown as Record<string, any>).goatcounter = {
+      count: (event: Record<string, unknown>) => events.push(event),
+    };
+
+    await withCutout();
+    // The app's shell switches views; the jsdom harness records that call but
+    // deliberately doesn't emulate the landing/editor CSS state.
+    $('#view-landing').classList.remove('on');
+    $('#view-editor').classList.add('on');
+    await tick(14_100);
+    expect($('#fb').classList.contains('on')).toBe(false);
+    expect($('#fbOpen').classList.contains('on')).toBe(true);
+
+    click('#fbOpen');
+    expect($('#fb').classList.contains('on')).toBe(true);
+    expect($('#fbOpen').classList.contains('on')).toBe(false);
+    click('#fbFine');
+    expect($('#fb').classList.contains('on')).toBe(false);
+    expect($('#fbOpen').classList.contains('on')).toBe(false);
+    click('#fbOpen');
+    expect($('#fb').classList.contains('on')).toBe(false); // vote was final for this image
+
+    await withCutout(); // newSession rearms feedback for the new image
+    $('#view-landing').classList.remove('on');
+    $('#view-editor').classList.add('on');
+    await tick(2_600);
+    expect($('#fb').classList.contains('on')).toBe(true);
+    click('#fbFix');
+    expect($('#fb').classList.contains('on')).toBe(false);
+    expect(events.map((event) => event.path)).toContain('feedback-needs-work');
+  }, 25_000);
 });
 
 describe('pending strokes do not cross sessions', () => {

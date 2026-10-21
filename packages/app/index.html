@@ -426,6 +426,11 @@
   #fb.on{display:block}
   #fb p{font-size:12.5px;margin-bottom:10px}
   #fb .row{display:flex;gap:8px}
+  #fbOpen{position:fixed;right:304px;bottom:52px;z-index:40;display:none;
+    width:40px;height:40px;border:1px solid var(--border);border-radius:50%;
+    background:var(--panel2);color:var(--accent);box-shadow:0 14px 40px rgba(0,0,0,.5)}
+  #fbOpen.on{display:inline-flex}
+  #fbOpen svg{width:18px;height:18px}
 
   /* batch */
   #view-batch{padding:0;overflow:hidden}
@@ -524,6 +529,7 @@
       box-shadow:0 -14px 40px rgba(0,0,0,.55)}
     #fb{right:8px;left:8px;width:auto;bottom:auto;top:58px;padding:10px 12px}
     #fb p{margin-bottom:8px}
+    #fbOpen{right:12px;bottom:calc(64px + env(safe-area-inset-bottom))}
     .statusbar{overflow-x:auto;scrollbar-width:none;gap:6px}
     .statusbar::-webkit-scrollbar{display:none}
     .statusbar .seg,.statusbar .iconbtn{flex:0 0 auto}
@@ -1032,13 +1038,20 @@
   <p id="localBackendLine" style="color:var(--muted)"></p>
 </div>
 
-<div id="fb">
+<div id="fb" role="group" aria-label="Cutout feedback">
   <p>How does the cutout look?</p>
   <div class="row">
     <button class="btn small ghost" id="fbFine">Fine</button>
     <button class="btn small ghost" id="fbFix">Needs fixing</button>
   </div>
 </div>
+<button class="iconbtn" id="fbOpen" type="button" aria-controls="fb" aria-expanded="false" aria-label="Give feedback on this cutout" title="Give feedback">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <path d="M20 11.5a7.5 7.5 0 0 1-7.5 7.5H7l-3 2v-5.1A7.5 7.5 0 1 1 20 11.5Z" />
+    <path d="M8.5 11.5h.01M12 11.5h.01M15.5 11.5h.01" />
+  </svg>
+</button>
+<span id="feedbackLive" class="sr" role="status" aria-live="polite"></span>
 
 <div id="toasts" role="status" aria-live="polite" aria-atomic="true"></div>
 <script>

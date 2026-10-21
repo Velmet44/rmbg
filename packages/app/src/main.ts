@@ -858,9 +858,80 @@ let prepToken = 0;
  *  `state` compares its epoch and bails if it moved. */
 let sessionEpoch = 0;
 
-/** Feedback-bubble timers. Held so a session change can cancel them: #fb is a
- *  body-level child, so an untracked timer pops it over whatever view is up. */
+/** Feedback prompt timers and per-image vote state. The launcher remains
+ *  available after the timed prompt closes, until a vote is submitted. */
 const fbTimers: number[] = [];
+let feedbackAvailable = false;
+let feedbackSubmitted = false;
+
+function clearFeedbackTimers(): void {
+  for (const timer of fbTimers) clearTimeout(timer);
+  fbTimers.length = 0;
+}
+
+function hideFeedbackSurface(): void {
+  clearFeedbackTimers();
+  ($('#fb') as HTMLElement)?.classList.remove('on');
+  const launcher = $('#fbOpen') as HTMLButtonElement;
+  launcher.classList.remove('on');
+  launcher.setAttribute('aria-expanded', 'false');
+  ($('#feedbackLive') as HTMLElement).textContent = '';
+}
+
+function minimizeFeedback(epoch: number): void {
+  if (epoch !== sessionEpoch || !feedbackAvailable || feedbackSubmitted) return;
+  ($('#fb') as HTMLElement).classList.remove('on');
+  const editorOpen = ($('#view-editor') as HTMLElement)?.classList.contains('on');
+  const launcher = $('#fbOpen') as HTMLButtonElement;
+  launcher.classList.toggle('on', Boolean(editorOpen));
+  launcher.setAttribute('aria-expanded', 'false');
+  ($('#feedbackLive') as HTMLElement).textContent = editorOpen ? 'Feedback is still available for this cutout.' : '';
+}
+
+function scheduleFeedbackPrompt(epoch = sessionEpoch): void {
+  if (!state.image || !state.mask || feedbackSubmitted) return;
+  clearFeedbackTimers();
+  feedbackAvailable = true;
+  const launcher = $('#fbOpen') as HTMLButtonElement;
+  launcher.classList.remove('on');
+  launcher.setAttribute('aria-expanded', 'false');
+  const show = window.setTimeout(() => {
+    if (epoch === sessionEpoch && !feedbackSubmitted
+      && ($('#view-editor') as HTMLElement)?.classList.contains('on')) {
+      ($('#fb') as HTMLElement).classList.add('on');
+      launcher.setAttribute('aria-expanded', 'true');
+      ($('#feedbackLive') as HTMLElement).textContent = 'How does the cutout look? Choose Fine or Needs fixing.';
+    }
+  }, 2500);
+  const minimize = window.setTimeout(() => minimizeFeedback(epoch), 14000);
+  fbTimers.push(show, minimize);
+}
+
+function reopenFeedbackPrompt(): void {
+  if (!feedbackAvailable || feedbackSubmitted || !state.image || !state.mask) return;
+  clearFeedbackTimers();
+  const launcher = $('#fbOpen') as HTMLButtonElement;
+  launcher.classList.remove('on');
+  launcher.setAttribute('aria-expanded', 'true');
+  ($('#fb') as HTMLElement).classList.add('on');
+  ($('#feedbackLive') as HTMLElement).textContent = 'Feedback choices reopened.';
+  const epoch = sessionEpoch;
+  fbTimers.push(window.setTimeout(() => minimizeFeedback(epoch), 14000));
+}
+
+function submitFeedbackVote(vote: 'good' | 'needs-work'): boolean {
+  if (!feedbackAvailable || feedbackSubmitted) return false;
+  feedbackSubmitted = true;
+  feedbackAvailable = false;
+  clearFeedbackTimers();
+  ($('#fb') as HTMLElement).classList.remove('on');
+  const launcher = $('#fbOpen') as HTMLButtonElement;
+  launcher.classList.remove('on');
+  launcher.setAttribute('aria-expanded', 'false');
+  ($('#feedbackLive') as HTMLElement).textContent = '';
+  trackGoatCounterEvent(vote === 'good' ? 'feedback-good' : 'feedback-needs-work');
+  return true;
+}
 
 /** Begin a new editing session. Clears module-level per-session state that
  *  `state.log = new OpLog()` does not cover — notably the pending brush strokes,
@@ -868,9 +939,9 @@ const fbTimers: number[] = [];
 function newSession(): void {
   sessionEpoch++;
   clearOverlay();
-  for (const t of fbTimers) clearTimeout(t);
-  fbTimers.length = 0;
-  $('#fb')?.classList.remove('on');
+  hideFeedbackSurface();
+  feedbackAvailable = false;
+  feedbackSubmitted = false;
 }
 
 /** Guards `realLoadFile`: the landing view stays live during the async decode,
@@ -1054,19 +1125,9 @@ async function realStart(withDemo: boolean) {
     // Reveal, don't flash: the wipe is the payoff moment after the overlay.
     runReveal();
     W.toast(`Background removed in ${((performance.now() - t0) / 1000).toFixed(1)}s · ${state.backend}`);
-    // Both timers are session-guarded and cancellable: untracked, they popped
-    // the feedback bubble over a LATER image's editor (and over the landing page,
-    // since #fb is a body-level child), and the 14s timer could close a bubble
-    // the user was still reading.
-    const showFb = window.setTimeout(() => {
-      if (myEpoch === sessionEpoch && ($('#view-editor') as HTMLElement)?.classList.contains('on')) {
-        $('#fb').classList.add('on');
-      }
-    }, 2500);
-    // The bubble overlaps the canvas: dismiss it automatically, it stays
-    // one tap away via Refine if the user disagrees later.
-    fbTimers.push(window.setTimeout(() => $('#fb').classList.remove('on'), 14000));
-    fbTimers.push(showFb);
+    // The prompt times out, but a small launcher stays available until the
+    // user submits one vote for this editing session.
+    scheduleFeedbackPrompt(myEpoch);
   } catch (e) {
     stopScan(); // idempotent; covers a failure before or after the hand-off
     if (my !== prepToken) return; // cancelled: landing is already showing
@@ -1384,6 +1445,7 @@ async function enableRemoval() {
     setCompareMode('after');
     refreshDisplay();
     W.toast('Background removed');
+    scheduleFeedbackPrompt(sessionEpoch);
   } catch (e) {
     state.removeBg = false;
     W.toast(`Could not remove background: ${String(e).slice(0, 120)}`, true);
@@ -2471,6 +2533,7 @@ async function openBatchItem(it: BatchItem) {
   if (state.mask) {
     setCompareMode('after');
     refreshDisplay();
+    scheduleFeedbackPrompt(sessionEpoch);
   } else {
     setCompareMode('before');
     up.style.display = 'block';
@@ -2481,6 +2544,7 @@ async function openBatchItem(it: BatchItem) {
 }
 
 function enterBatch() {
+  hideFeedbackSurface();
   W.showView('view-batch');
   renderBatch();
   void pumpBatch(); // resumes anything still queued
@@ -2745,6 +2809,10 @@ W.loadFile = realLoadFile;
 W.startPreparing = realStart;
 W.setCompare = realCompare;
 W.runExport = realExport;
+($('#btnBack') as HTMLButtonElement).onclick = () => {
+  hideFeedbackSurface();
+  W.showView('view-landing');
+};
 // The overlay is owned here, not by the shell: its duration has to equal the
 // work's duration, which only the code awaiting the worker knows.
 W.startScan = startScan;
@@ -2754,14 +2822,13 @@ syncStrokeButtons();
 installRefineCapture();
 wireExportDrawer();
 installRemoveSwitch();
+($('#fbOpen') as HTMLButtonElement).onclick = reopenFeedbackPrompt;
 ($('#fbFine') as HTMLButtonElement).onclick = () => {
-  trackGoatCounterEvent('feedback-good');
-  ($('#fb') as HTMLElement).classList.remove('on');
+  if (!submitFeedbackVote('good')) return;
   W.toast('Thanks for the feedback');
 };
 ($('#fbFix') as HTMLButtonElement).onclick = () => {
-  trackGoatCounterEvent('feedback-needs-work');
-  ($('#fb') as HTMLElement).classList.remove('on');
+  if (!submitFeedbackVote('needs-work')) return;
   W.setTool('refine');
   W.toast('Refine tools ready');
 };

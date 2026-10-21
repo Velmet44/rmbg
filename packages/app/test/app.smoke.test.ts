@@ -88,8 +88,9 @@ describe('markup contract', () => {
   it('binds the editor actions main.ts rebinds from the mock shell', () => {
     // onclick is an IDL attribute, so "is it bound" is a function check.
     const bound: string[] = [
-      '#btnUndo', '#btnRedo', '#btnDoExport', '#btnPrepCancel', '#btnBatch',
+      '#btnUndo', '#btnRedo', '#btnDoExport', '#btnPrepCancel', '#btnBack', '#btnBatch',
       '#btnBatchAdd', '#btnBatchExport', '#btnToBatch', '#confirmOk', '#btnSendReport',
+      '#fbOpen', '#fbFine', '#fbFix',
     ];
     for (const sel of bound) {
       const el = app.document.querySelector(sel) as HTMLElement | null;
