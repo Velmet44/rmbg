@@ -20,6 +20,9 @@
 <meta name="twitter:description" content="Free, open-source background remover that runs entirely in your browser. No upload, no account, no watermark." />
 <meta name="twitter:image" content="https://velmet44.github.io/rmbg/sample-split.png" />
 <link rel="icon" href="data:," />
+<script id="goatcounter-script" data-goatcounter="https://velmet.goatcounter.com/count"
+        data-goatcounter-settings='{"path":"/rmbg/"}'
+        async src="https://gc.zgo.at/count.js"></script>
 <style>
   :root{
     --bg:#0b0d0f; --bg2:#101315; --panel:#14181c; --panel2:#191e23;
@@ -609,6 +612,10 @@
     <details class="faq reveal">
       <summary>Do my photos leave my device?<span class="plus" aria-hidden="true">+</span></summary>
       <div class="faq-a"><div class="faq-ai"><p>No. Your image is processed on your device and its bytes are never uploaded. On first use, the browser downloads the inference runtime from jsDelivr and model weights (~98&nbsp;MB) from Hugging Face; these downloads are cached for later visits.</p></div></div>
+    </details>
+    <details class="faq reveal">
+      <summary>What analytics does the site collect?<span class="plus" aria-hidden="true">+</span></summary>
+      <div class="faq-a"><div class="faq-ai"><p>The site uses GoatCounter for page views and fixed events for model readiness, successful/failed cutouts or region recomputes, exports, and your optional “Fine” or “Needs fixing” vote. GoatCounter receives the page path and referrer plus browser, approximate location, and screen-size metadata for aggregate statistics. RMBG never sends image pixels, filenames, or image dimensions to analytics. GoatCounter describes its hosted service as cookieless and not storing persistent personal identifiers; see its <a href="https://www.goatcounter.com/privacy" target="_blank" rel="noopener">privacy policy</a>.</p></div></div>
     </details>
     <details class="faq reveal">
       <summary>Why is the first run slow?<span class="plus" aria-hidden="true">+</span></summary>
@@ -1363,8 +1370,8 @@ document.addEventListener("click",e=>{
   if(!localPop.contains(e.target)){localPop.classList.remove("on"); localBtn.setAttribute("aria-expanded","false");}
 });
 
-/* feedback bubble */
-$("#fbFine").onclick=()=>{$("#fb").classList.remove("on");toast("Thanks — kept locally");};
+/* feedback bubble — main.ts owns the analytics-aware handlers. */
+$("#fbFine").onclick=()=>{$("#fb").classList.remove("on");toast("Thanks for the feedback");};
 $("#fbFix").onclick=()=>{$("#fb").classList.remove("on");setTool("refine");toast("Refine tools ready");};
 
 /* export drawer — open/close only.

@@ -566,7 +566,7 @@ export interface LoadedApp {
 const APP_GLOBALS = [
   '__rmbg', '__rmbgDebug', '__rmbgSplitLock', 'rmbg', 'rmbgTime',
   'loadFile', 'startPreparing', 'setCompare', 'runExport', 'startScan', 'stopScan',
-  'toast', 'showView', 'compareMode',
+  'toast', 'showView', 'compareMode', 'goatcounter',
 ];
 
 let lastApp: LoadedApp | null = null;

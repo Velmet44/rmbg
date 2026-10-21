@@ -101,6 +101,27 @@ describe('session epoch', () => {
   });
 });
 
+describe('privacy-conscious analytics', () => {
+  it('sends fixed usage and explicit feedback event names only', async () => {
+    const events: Record<string, unknown>[] = [];
+    (app.window as unknown as Record<string, any>).goatcounter = {
+      count: (event: Record<string, unknown>) => events.push(event),
+    };
+
+    await withCutout();
+    click('#fbFine');
+    click('#fbFix');
+
+    const paths = events.map((event) => event.path);
+    expect(paths).toContain('model-ready');
+    expect(paths).toContain('inference-success');
+    expect(paths).toContain('feedback-good');
+    expect(paths).toContain('feedback-needs-work');
+    expect(events.every((event) => event.event === true && event.no_session === true)).toBe(true);
+    expect(events.every((event) => Object.keys(event).sort().join(',') === 'event,no_session,path')).toBe(true);
+  });
+});
+
 describe('pending strokes do not cross sessions', () => {
   it('clears staged strokes when a new file is loaded', async () => {
     // Strokes are module state, not OpLog state, so a session swap used to

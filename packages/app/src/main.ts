@@ -45,6 +45,46 @@ dbg('boot', `main.ts evaluated · model=${MODEL_ID} rev=${MODEL_REV.slice(0, 8)}
 const W = window as unknown as Record<string, any>;
 const $ = (s: string) => document.querySelector(s) as HTMLElement;
 const $$ = (s: string) => Array.from(document.querySelectorAll(s)) as HTMLElement[];
+type GoatCounterEvent =
+  | 'model-ready' | 'model-init-failure'
+  | 'inference-success' | 'inference-failure'
+  | 'region-recompute-success' | 'region-recompute-failure'
+  | 'export-success' | 'export-failure'
+  | 'feedback-good' | 'feedback-needs-work';
+type GoatCounterClient = {
+  count?: (event: { path: GoatCounterEvent; event: true; no_session: true }) => void;
+};
+const pendingGoatCounterEvents: GoatCounterEvent[] = [];
+function sendGoatCounterEvent(event: GoatCounterEvent, client: GoatCounterClient): void {
+  try {
+    // Fixed event names only: never attach image, file, dimension, or user data.
+    client.count?.({ path: event, event: true, no_session: true });
+  } catch {
+    // Analytics is best-effort and must never affect editing/export.
+  }
+}
+function trackGoatCounterEvent(event: GoatCounterEvent): void {
+  const client = W.goatcounter as GoatCounterClient | undefined;
+  if (typeof client?.count === 'function') {
+    sendGoatCounterEvent(event, client);
+  } else if (pendingGoatCounterEvents.length < 32) {
+    // The script is async. Buffer a small bounded queue until it loads; if it is
+    // blocked, the events remain local and disappear with this page session.
+    pendingGoatCounterEvents.push(event);
+  }
+}
+function flushGoatCounterEvents(): void {
+  const client = W.goatcounter as GoatCounterClient | undefined;
+  if (typeof client?.count !== 'function') return;
+  for (const event of pendingGoatCounterEvents.splice(0)) sendGoatCounterEvent(event, client);
+}
+const goatCounterScript = document.getElementById('goatcounter-script');
+if (typeof (W.goatcounter as GoatCounterClient | undefined)?.count === 'function') {
+  flushGoatCounterEvents();
+} else {
+  goatCounterScript?.addEventListener('load', flushGoatCounterEvents, { once: true });
+}
+
 
 const FX_OFF: Effects = {
   shadow: { on: false, opacity: 0.4, blur: 18, dx: 0, dy: 12 },
@@ -544,6 +584,7 @@ async function ensureReady(): Promise<void> {
   dbg('model', 'ensureReady()');
   try {
     const res = await callWorker({ type: 'init' }, undefined, (p) => tracker.onEvent(p));
+    trackGoatCounterEvent('model-ready');
     state.backend = res.backend ?? 'unknown';
     gpuDesc = res.gpu ?? 'unknown';
     // Trust the runtime's own cache bucket over our seed.
@@ -551,6 +592,9 @@ async function ensureReady(): Promise<void> {
     dbgTable('model', `session ready · ${backendLabel()}`, {
       backend: state.backend, gpu: gpuDesc, cacheName, model: res.model,
     });
+  } catch (e) {
+    trackGoatCounterEvent('model-init-failure');
+    throw e;
   } finally {
     tracker.finish();
     syncBackendUI();
@@ -904,7 +948,14 @@ async function segmentCurrent(): Promise<AlphaMask> {
   // the main-thread original intact for compositing).
   const copy = new Uint8ClampedArray(img.rgb);
   const t0 = now();
-  const res = await callWorker({ type: 'segment', imageId: img.id, w: img.width, h: img.height, rgb: copy.buffer }, [copy.buffer]);
+  let res: Awaited<ReturnType<typeof callWorker>>;
+  try {
+    res = await callWorker({ type: 'segment', imageId: img.id, w: img.width, h: img.height, rgb: copy.buffer }, [copy.buffer]);
+  } catch (e) {
+    trackGoatCounterEvent('inference-failure');
+    throw e;
+  }
+  trackGoatCounterEvent('inference-success');
   dbg('infer', `segmentCurrent returned ${res.w}×${res.h} in ${(now() - t0).toFixed(0)}ms · backend=${res.backend} gpu=${res.gpu}`);
   // Adopt the backend this call used: a WebGPU session can fail during
   // execution and the adapter silently rebuilds on WASM.
@@ -1566,10 +1617,12 @@ async function realExport() {
     a.download = `rmbg-export-${size.w}x${size.h}.${ext}`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    trackGoatCounterEvent('export-success');
     $('#expNote').textContent = `Done: ${a.download} · ${(blob.size / 1048576).toFixed(2)} MB · ${note}`;
     W.toast('Export complete');
     syncUndoRedo();
   } catch (e) {
+    trackGoatCounterEvent('export-failure');
     dbgWarnLog('export', `export failed: ${String(e)}`);
     $('#expNote').textContent = `Export failed: ${String(e).slice(0, 140)} — retry or try PNG.`;
     W.toast('Export failed', true);
@@ -2075,6 +2128,7 @@ async function recomputeApply() {
       mw: state.mask.width, mh: state.mask.height, alpha: maskCopy.buffer,
       bbox: box,
     }, [imgCopy.buffer, maskCopy.buffer]);
+    trackGoatCounterEvent('region-recompute-success');
     adoptBackend(res);
     commitMaskSwap('recompute region', { width: res.w, height: res.h, alpha: new Float32Array(res.alpha) });
     recompBox = null;
@@ -2082,6 +2136,7 @@ async function recomputeApply() {
     refreshDisplay();
     W.toast('Region recomputed — rest untouched');
   } catch (e) {
+    trackGoatCounterEvent('region-recompute-failure');
     // Nothing was swapped, so the previous mask is still intact.
     W.toast(`Recompute failed: ${String(e).slice(0, 140)}`, true);
   } finally {
@@ -2305,11 +2360,13 @@ async function pumpBatch(): Promise<void> {
           { type: 'segment', imageId: it.image.id, w: it.image.width, h: it.image.height, rgb: copy.buffer },
           [copy.buffer],
         );
+        trackGoatCounterEvent('inference-success');
         it.mask = { width: res.w, height: res.h, alpha: new Float32Array(res.alpha) };
         it.status = 'done';
         delete it.err;
         dbg('batch', `done "${it.name}" in ${(now() - t0).toFixed(0)}ms · ${it.image.width}×${it.image.height} · backend=${res.backend}`);
       } catch (e) {
+        trackGoatCounterEvent('inference-failure');
         // One failure never blocks the rest of the queue.
         it.status = 'err';
         it.err = String(e).slice(0, 140);
@@ -2435,12 +2492,13 @@ async function downloadItemPNG(it: BatchItem): Promise<void> {
   const tmp = document.createElement('canvas');
   drawComposite(tmp, { image: it.image, mask: it.mask }, { kind: 'transparent' }, FX_OFF);
   const blob: Blob | null = await new Promise((res) => tmp.toBlob(res, 'image/png'));
-  if (!blob) { W.toast(`Export failed for ${it.name}`, true); return; }
+  if (!blob) { trackGoatCounterEvent('export-failure'); W.toast(`Export failed for ${it.name}`, true); return; }
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = `${stem(it.name)}-cutout.png`;
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  trackGoatCounterEvent('export-success');
   dbg('batch', `PNG for "${it.name}" in ${(now() - t0).toFixed(0)}ms · ${(blob.size / 1048576).toFixed(2)} MB`);
   W.toast(`Exported ${a.download}`);
 }
@@ -2524,7 +2582,7 @@ async function exportAllZIP(): Promise<void> {
     const tmp = document.createElement('canvas');
     drawComposite(tmp, { image: it.image, mask: it.mask! }, { kind: 'transparent' }, FX_OFF);
     const blob: Blob | null = await new Promise((res) => tmp.toBlob(res, 'image/png'));
-    if (!blob) { W.toast(`Export failed for ${it.name}`, true); continue; }
+    if (!blob) { trackGoatCounterEvent('export-failure'); W.toast(`Export failed for ${it.name}`, true); continue; }
     files.push({ name: `${stem(it.name)}-cutout.png`, data: new Uint8Array(await blob.arrayBuffer()) });
     i++;
   }
@@ -2537,6 +2595,7 @@ async function exportAllZIP(): Promise<void> {
   a.download = 'rmbg-batch.zip';
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 5000);
+  trackGoatCounterEvent('export-success');
   renderBatch();
   W.toast(`Exported ${files.length} cutout${files.length === 1 ? '' : 's'} (.zip)`);
 }
@@ -2558,11 +2617,10 @@ const batchPicker = (() => {
 })();
 
 // ---------- footer ----------
-// NOTE: the live GitHub star counter was removed here. It fired an
-// `api.github.com` request on every visitor's first load of the day, which
-// discloses their IP to a third party on a page whose entire promise is
-// "no analytics, no tracking, no upload" (SPEC §10). The footer keeps a plain
-// link to the repository instead.
+// NOTE: the live GitHub star counter was removed because it made an
+// undisclosed api.github.com request on page load. GoatCounter is now used for
+// disclosed aggregate page/use events; only fixed event names are sent, never
+// image data. The footer keeps a plain link to the repository instead.
 
 // ---------- destructive-action confirm ----------
 // One small modal for actions that destroy work the user cannot get back.
@@ -2696,6 +2754,17 @@ syncStrokeButtons();
 installRefineCapture();
 wireExportDrawer();
 installRemoveSwitch();
+($('#fbFine') as HTMLButtonElement).onclick = () => {
+  trackGoatCounterEvent('feedback-good');
+  ($('#fb') as HTMLElement).classList.remove('on');
+  W.toast('Thanks for the feedback');
+};
+($('#fbFix') as HTMLButtonElement).onclick = () => {
+  trackGoatCounterEvent('feedback-needs-work');
+  ($('#fb') as HTMLElement).classList.remove('on');
+  W.setTool('refine');
+  W.toast('Refine tools ready');
+};
 syncRemoveSwitch();
 // Scroll reveal for the FAQ (and anything else marked .reveal): fade/slide
 // in on entry, once. Root is the landing scroller; reduced-motion users

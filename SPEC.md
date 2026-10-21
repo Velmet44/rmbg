@@ -317,11 +317,11 @@ Gate rule: **no editor work beyond Stage 1 until the Stage 0 benchmark passes.**
 
 ## 10. Privacy and security requirements
 
-- Default flow: no account, no image upload, no server-side processing, no analytics, no tracking, no advertising.
-- **First visit makes two third-party requests, both code and weights, never image bytes**: the pinned CDN ESM runtime bundle (jsDelivr, §6.5) and the model weights (Hugging Face). Any statement implying the model file is the only download is false and must not appear in the UI or the docs. After the first visit both are served from cache and the app makes no outbound request at all; the app itself adds none, and decorative counters that needed an API were removed rather than kept. Image pixels are never part of any of these requests, which is the promise the product actually makes.
-- After model + runtime assets are cached, the full single-image flow must pass with network disabled (subject to browser limits). **NOT DONE:** a full network-off run of the shipped flow has not been performed; only a return-visit-no-download check exists (`benchmarks/GATE.md`).
+- Default flow: no account, no image upload, no server-side image processing, and no advertising. The site uses GoatCounter for page views and a fixed set of aggregate app-use and explicit feedback events.
+- **Image bytes are never sent to analytics or an RMBG server.** First use downloads the pinned inference runtime from jsDelivr and model weights from Hugging Face. GoatCounter receives page-view requests and fixed event names for model readiness, successful/failed inference and region recompute, exports, and optional feedback votes; its standard visit metadata includes page path/referrer, browser, approximate location, and screen size. Never send image pixels, filenames, image dimensions, EXIF, free text, or device identifiers in an analytics event. Any statement implying that the model is the only download is false and must not appear in the UI or docs.
+- GoatCounter is best-effort: if it is blocked, unavailable, or offline, the app must work unchanged. Once model + runtime assets are cached, the core single-image flow must pass with network disabled (subject to browser limits); failed analytics requests must not block it. **NOT DONE:** a full network-off run of the shipped flow has not been performed; only a return-visit-no-download check exists (`benchmarks/GATE.md`).
 - Clipboard, file, and camera inputs are handled in-memory/locally. No image bytes in URLs, logs, or error reports.
-- Optional quality-feedback prompt (`Fine` / `Needs fixing` + reason) is local-only unless the user explicitly opts into sending a diagnostic payload. Any opt-in payload excludes original pixels by default.
+- The optional quality-feedback prompt sends only the selected fixed vote (`Fine` / `Needs fixing`) to GoatCounter. Detailed reports remain explicit user action: the app opens a prefilled GitHub draft, which the user reviews and submits; no image pixels are attached.
 - BYOM URLs are fetched directly by the client; upstream license text is shown before download.
 
 ## 11. Reliability and error handling
