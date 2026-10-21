@@ -3,7 +3,9 @@
 **Free · Open-source (MIT) · No account · No credits · No artificial app resolution cap · No upload.**
 
 Drop a photo, get a professional cutout. Everything runs locally in your
-browser (WebGPU with CPU fallback) — your images never leave the machine.
+browser (WebGPU with CPU fallback) — your images never leave the machine. On
+first use, your browser downloads the inference runtime from jsDelivr and the
+model weights (~98 MB) from Hugging Face; both are cached for later visits.
 
 **Try it now: https://velmet44.github.io/rmbg**
 
@@ -16,10 +18,10 @@ browser (WebGPU with CPU fallback) — your images never leave the machine.
 ## Use it
 
 1. Open the link above (desktop or mobile).
-2. Drop an image — the first download takes ~5–15 s; subsequent visits skip it entirely.
+2. Drop an image — first use downloads and initializes the runtime and model; later visits usually reuse the browser cache.
 3. Inspect (before/after, split view, mask), refine if needed, export PNG/WebP/JPEG (plus AVIF where your browser can encode it).
 
-Reloads skip the download entirely.
+When the browser retains its cache, later visits reuse those downloads.
 
 ## What works today
 

@@ -604,15 +604,15 @@
     <h2 class="reveal">FAQ</h2>
     <details class="faq reveal">
       <summary>Is it really free? What's the catch?<span class="plus" aria-hidden="true">+</span></summary>
-      <div class="faq-a"><div class="faq-ai"><p>Yes. MIT-licensed, no account, no credits, no watermark, no artificial resolution cap. The ~98&nbsp;MB AI model downloads once and lives in your browser cache.</p></div></div>
+      <div class="faq-a"><div class="faq-ai"><p>Yes. MIT-licensed, no account, no credits, no watermark, and no artificial app-imposed resolution cap. On first use, the model weights (~98&nbsp;MB) and inference runtime download from third-party CDNs and are cached by your browser.</p></div></div>
     </details>
     <details class="faq reveal">
       <summary>Do my photos leave my device?<span class="plus" aria-hidden="true">+</span></summary>
-      <div class="faq-a"><div class="faq-ai"><p>No. Inference runs on-device; image bytes are never uploaded. The only download is the model itself.</p></div></div>
+      <div class="faq-a"><div class="faq-ai"><p>No. Your image is processed on your device and its bytes are never uploaded. On first use, the browser downloads the inference runtime from jsDelivr and model weights (~98&nbsp;MB) from Hugging Face; these downloads are cached for later visits.</p></div></div>
     </details>
     <details class="faq reveal">
       <summary>Why is the first run slow?<span class="plus" aria-hidden="true">+</span></summary>
-      <div class="faq-a"><div class="faq-ai"><p>First visit downloads the model and builds the session; return visits skip the download. GPU-backed browsers are fastest with a slower CPU fallback — the app tells you which it's using.</p></div></div>
+      <div class="faq-a"><div class="faq-ai"><p>The first visit downloads the inference runtime and model, then builds an inference session. Return visits usually reuse the browser cache, though the browser may clear it. Startup time depends on your connection and device. WebGPU is fastest; CPU fallback can be slower, and the app tells you which backend it is using.</p></div></div>
     </details>
     <details class="faq reveal">
       <summary>Erase, restore, guided, recompute — which do I use?<span class="plus" aria-hidden="true">+</span></summary>
