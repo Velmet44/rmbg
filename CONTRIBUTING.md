@@ -55,6 +55,7 @@ npm run test --workspace @rmbg/engine
 npm run typecheck --workspace @rmbg/app
 npm run test --workspace @rmbg/app
 npm run build --workspace @rmbg/app
+npm run validate:manifest                    # offline: schema, MIT default, ID/revision vs model-config.ts
 ```
 
 `npm test` runs the test scripts across workspaces that define one. The app

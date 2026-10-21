@@ -10,6 +10,8 @@
   "scripts": {
     "test": "npm run test --workspaces --if-present",
     "build": "npm run build --workspaces --if-present",
+    "validate:manifest": "node models/validate-manifest.mjs",
+    "test:manifest": "node --test models/validate-manifest.test.mjs",
     "bench": "npm run build --workspace @rmbg/app && node benchmarks/runner/bin/rmbg-bench.mjs serve",
     "bench:serve": "node benchmarks/runner/bin/rmbg-bench.mjs serve",
     "bench:validate": "node benchmarks/runner/bin/rmbg-bench.mjs validate",
