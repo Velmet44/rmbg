@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>RMBG benchmark — measure this machine</title>
+<meta name="description" content="Run the RMBG benchmark suite in your browser and contribute the results. No upload, no account, no image data." />
+<link rel="icon" href="data:," />
+<style>
+  :root{
+    --bg:#0b0d0f; --bg2:#101315; --panel:#14181c; --panel2:#191e23;
+    --border:#242b32; --text:#e9edf0; --muted:#98a2ab; --faint:#7f8993;
+    --accent:#34d399; --accent-dim:rgba(52,211,153,.14);
+    --warn:#fbbf24; --danger:#f87171;
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --font:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--text);font-family:var(--font);font-size:14px;line-height:1.55;
+    padding:32px 20px 80px;max-width:1080px;margin:0 auto}
+  h1{font-size:24px;letter-spacing:-.01em;margin-bottom:6px}
+  h2{font-size:15px;letter-spacing:.02em;margin:26px 0 10px}
+  a{color:var(--accent)}
+  .sub{color:var(--muted);margin-bottom:22px}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:14px}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  .btn{font:inherit;font-weight:650;font-size:13.5px;cursor:pointer;border:1px solid var(--border);
+    background:var(--panel2);color:var(--text);border-radius:8px;padding:9px 15px;transition:.14s}
+  .btn:hover{border-color:#3a434d;background:#20262c}
+  .btn.primary{background:var(--accent);border-color:var(--accent);color:#06281c;font-weight:700}
+  .btn:disabled{opacity:.45;cursor:not-allowed}
+  .btn.small{padding:6px 11px;font-size:12.5px}
+  label.opt{display:flex;gap:9px;align-items:flex-start;padding:9px 10px;border:1px solid var(--border);
+    border-radius:9px;margin-bottom:8px;cursor:pointer;font-size:13px}
+  label.opt:hover{border-color:#3a434d}
+  label.opt input{margin-top:2px;accent-color:var(--accent);flex:0 0 auto}
+  label.opt .d{display:block;color:var(--muted);font-size:12px;margin-top:1px}
+  .modes{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px;margin-bottom:6px}
+  .mode{border:1px solid var(--border);background:var(--panel);border-radius:11px;padding:13px;cursor:pointer;transition:.14s}
+  .mode:hover{border-color:#3a434d}
+  .mode.on{border-color:rgba(52,211,153,.55);background:var(--accent-dim)}
+  .mode .t{font-weight:700;font-size:13.5px}
+  .mode .m{color:var(--muted);font-size:12px;margin-top:3px}
+  .mode .w{color:var(--warn);font-size:11.5px;margin-top:6px}
+  .pill{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600;
+    border:1px solid var(--border);border-radius:99px;padding:3px 9px;color:var(--muted);background:var(--panel)}
+  .mono{font-family:var(--mono);font-size:12px}
+  .log{font-family:var(--mono);font-size:11.5px;line-height:1.5;max-height:340px;overflow:auto;
+    background:#0d1114;border:1px solid var(--border);border-radius:9px;padding:12px;white-space:pre-wrap;color:var(--muted)}
+  .progress{height:8px;background:#0d1114;border:1px solid var(--border);border-radius:99px;overflow:hidden;margin:10px 0}
+  .progress i{display:block;height:100%;width:0;background:linear-gradient(90deg,#1f9d6c,var(--accent));transition:width .25s}
+  table{width:100%;border-collapse:collapse;font-size:12.5px}
+  th,td{text-align:left;padding:7px 9px;border-bottom:1px solid var(--border);vertical-align:top}
+  th{color:var(--faint);font-size:11px;letter-spacing:.09em;text-transform:uppercase;font-weight:700}
+  td.num{font-family:var(--mono);text-align:right;white-space:nowrap}
+  .ok{color:var(--accent)} .bad{color:var(--danger)} .skip{color:var(--warn)}
+  pre.json{background:#0d1114;border:1px solid var(--border);border-radius:9px;padding:12px;
+    font-family:var(--mono);font-size:11px;max-height:300px;overflow:auto;color:var(--muted);white-space:pre-wrap}
+  .note{color:var(--faint);font-size:12px;margin-top:8px}
+  .warnbox{border-color:rgba(251,191,36,.4);background:rgba(251,191,36,.06)}
+  .stat{display:flex;gap:18px;flex-wrap:wrap;margin:10px 0 4px}
+  .stat div{font-family:var(--mono);font-size:12px;color:var(--muted)}
+  .stat b{display:block;color:var(--text);font-size:17px;font-weight:700}
+</style>
+</head>
+<body>
+
+<h1>RMBG benchmark</h1>
+<p class="sub">
+  Measure this machine running the real RMBG app code, then send the numbers back.
+  Everything runs locally. <strong>No upload, no account, no image data</strong> — you download one
+  JSON file and decide whether to submit it.
+</p>
+
+<div class="card">
+  <h2 style="margin-top:0">1 · Choose a mode</h2>
+  <div class="modes" id="modes"></div>
+  <p class="note" id="modeNote"></p>
+</div>
+
+<div class="card">
+  <h2 style="margin-top:0">2 · Choose what to measure</h2>
+  <div id="suites"></div>
+  <h2>3 · Options</h2>
+  <label class="opt">
+    <input type="checkbox" id="optHardware" />
+    <span>
+      Include hardware detail in the report
+      <span class="d">Adds your GPU adapter string, exact RAM and JS heap limit. Off by default: those
+      fields identify a machine more precisely than they help compare one. Availability flags (has
+      WebGPU, can encode AVIF) are always included — they are results, not identity.</span>
+    </span>
+  </label>
+  <label class="opt" id="coldRow">
+    <input type="checkbox" id="optCold" />
+    <span>
+      Measure a cold first run (clears the model cache)
+      <span class="d">Deletes <em>only</em> RMBG's model cache bucket, then downloads the weights again
+      (~98 MB). This is the only way to measure the first-visit experience; it costs you the download
+      twice. Off by default, so running a benchmark never silently throws away your cached model.</span>
+    </span>
+  </label>
+  <label class="opt">
+    <input type="checkbox" id="optVerbose" />
+    <span>
+      Keep the engine debug log
+      <span class="d">Off by default. The logger builds a string on every composite and brush stamp, so
+      leaving it on shows up as benchmark time that belongs to the logger.</span>
+    </span>
+  </label>
+  <label class="opt">
+    <input type="checkbox" id="optLabel" />
+    <span>
+      Label this machine
+      <span class="d">Optional, e.g. <span class="mono">workstation</span> or <span class="mono">thinkpad</span>. A
+      nickname only — never a hostname or a username.</span>
+    </span>
+  </label>
+  <div id="labelRow" style="display:none"><input class="field" id="hostLabel" placeholder="nickname (optional)" style="width:260px;padding:8px 10px;background:var(--panel2);border:1px solid var(--border);border-radius:8px;color:var(--text);font:inherit" /></div>
+</div>
+
+<div class="card">
+  <div class="row">
+    <button class="btn primary" id="btnRun">Run benchmark</button>
+    <button class="btn" id="btnCancel" disabled>Cancel</button>
+    <button class="btn small" id="btnClear" style="margin-left:auto">Dismiss saved partial run</button>
+  </div>
+  <div class="progress"><i id="bar"></i></div>
+  <div class="stat">
+    <div>cases<b id="statDone">0</b></div>
+    <div>current<b id="statCur" style="font-size:13px">—</b></div>
+    <div>elapsed<b id="statTime">0s</b></div>
+  </div>
+  <div class="log" id="log">Ready. Nothing has run yet.</div>
+  <p class="note" id="partialNote"></p>
+</div>
+
+<div class="card" id="resultCard" style="display:none">
+  <h2 style="margin-top:0">4 · Review and submit</h2>
+  <div class="stat" id="resultStats"></div>
+  <div id="summaryTable"></div>
+  <div class="row" style="margin-top:14px">
+    <button class="btn primary" id="btnDownload">Download report (JSON)</button>
+    <button class="btn small" id="btnCopy">Copy JSON</button>
+    <button class="btn small" id="btnValidate">Self-check against the schema</button>
+  </div>
+  <p class="note" id="validateOut"></p>
+  <h2>What is in this file</h2>
+  <pre class="json" id="jsonPreview" style="max-height:220px"></pre>
+  <h2>How to contribute it</h2>
+  <p class="note">
+    Attach it to a GitHub issue at
+    <a href="https://github.com/Velmet44/rmbg/issues" target="_blank" rel="noopener">Velmet44/rmbg/issues</a>
+    titled <span class="mono">Benchmark report</span>, or open a PR adding it to
+    <span class="mono">benchmarks/results/accepted/</span>.<br />
+    It contains no image bytes, no file names and no URLs — <span class="mono">npm run bench:validate</span>
+    scans every string for those and rejects the report if one appears.
+  </p>
+</div>
+
+<script type="module" src="./src/bench/page.ts"></script>
+</body>
+</html>

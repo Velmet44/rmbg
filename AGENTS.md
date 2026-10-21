@@ -16,7 +16,7 @@
   crossing the shell boundary — that is the main reason to keep new logic in
   `main.ts` and out of the inline shell.
 - `benchmarks/harness` — Stage 0 rig. Measure: `npm run measure --workspace @rmbg/harness -- --model=<id> --device=webgpu|wasm` (needs Playwright CLI session `rmbg`).
-- `models/manifest.json` — model provenance (schema + `LICENSE-AUDIT.md` beside it). Never commit weights, fixtures, or results (see `.gitignore`).
+- `models/manifest.json` — model provenance (schema + `LICENSE-AUDIT.md` beside it). Never commit model weights, private/user photos, local harness fixtures, or raw/ad-hoc benchmark runs. A benchmark report may be committed only after `npm run bench:accept -- <report.json>` validates it into `benchmarks/results/accepted/`; CI revalidates accepted reports (see `benchmarks/README.md` and `.gitignore`).
 - No UI framework. Engine must stay DOM-free; app owns canvas/DOM.
 - Inference runtime loads from pinned CDN ESM at runtime (never bundle it —
   bundling produced silently broken sessions). One live inference session per
@@ -82,3 +82,32 @@
 - Prefer executable sources of truth (`package.json` scripts, `Makefile`, CI workflows) over prose once they exist.
 - When a stack/commands are added, record here only the exact non-obvious commands (e.g. single-test, codegen, migration order).
 - Keep this file compact: only lines an agent would likely miss without help.
+
+## Benchmarks (`npm run bench`)
+- `packages/app/bench.html` + `src/bench/` is a separate vite entry; it must
+  stay out of `index.html`'s bundle. Contributors run it with no install, so
+  anything it needs must be in `src/bench/` or `benchmarks/lib/`.
+- `src/{decode,canvas-out,zip}.ts` exist so the bench measures the SHIPPED
+  paths. Do not inline them back into `main.ts` and do not re-implement them in
+  a suite — a copied function measures code nobody runs.
+- `benchmarks/lib/stats.mjs` and `validate-core.mjs` are imported by BOTH the
+  browser and Node (`allowJs` in the app tsconfig). Plain ESM, no deps, no Node
+  built-ins in `validate-core.mjs`. Keep it that way or the contributor's
+  self-check stops matching CI.
+- `stats` in a report is DERIVED from `samples`; `benchmarks/lib/validate.mjs`
+  recomputes it and rejects a mismatch. Never hand-write a median.
+- Reports carry no image bytes / filenames / URLs. The privacy scan is the only
+  thing making that promise testable — do not add an `except` to it without a
+  reason that survives review.
+- Cohorts are never pooled across backend / cache / browser / mode.
+- `window.__rmbgBench.auto()` MUST return synchronously. A driver evaluates it
+  through a terminal command with its own timeout; awaiting the run there kills
+  the browser mid-measurement.
+- Spawning the Playwright CLI from Node: `.cmd` shims need `shell: true`, and
+  `shell: true` joins argv unquoted (so `shell: true` with a hand-built command
+  string splits eval expressions on spaces — pass the argv ARRAY and let Node
+  quote it). Session comes from `PLAYWRIGHT_CLI_SESSION` only; `-s=` on `open`
+  makes it print usage and launch nothing. Stale sessions wedge the daemon —
+  close them by name, and never kill browsers by process name to "clean up".
+- `bench:browser` is best-effort. If its probe fails it exits 2 with the manual
+  steps on purpose; the browser page is the supported path.

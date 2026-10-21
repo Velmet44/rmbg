@@ -1,0 +1,213 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://velmet44.github.io/rmbg/bench/report.schema.json",
+  "title": "RMBG benchmark report",
+  "description": "One browser's measurements of the shipped RMBG app. Contains NO image bytes, NO file names, NO URLs and NO error text that could carry a local path. Validated by `npm run bench:validate`; summaries are generated from accepted reports only.",
+  "type": "object",
+  "required": ["schemaVersion", "suiteVersion", "app", "run", "environment", "capabilities", "cases", "privacy"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": { "const": "rmbg-bench/1" },
+    "suiteVersion": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+
+    "app": {
+      "type": "object",
+      "required": ["model", "engine"],
+      "additionalProperties": false,
+      "properties": {
+        "commit": { "type": ["string", "null"], "description": "App build identity. Null on a local dev server, which is recorded rather than guessed." },
+        "buildKind": { "type": "string", "enum": ["dev", "preview", "deployed", "unknown"] },
+        "model": {
+          "type": "object",
+          "required": ["id", "revision"],
+          "additionalProperties": false,
+          "properties": {
+            "id": { "type": "string", "minLength": 1 },
+            "revision": { "type": "string", "minLength": 1 }
+          }
+        },
+        "runtime": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "id": { "type": "string" },
+            "version": { "type": ["string", "null"] }
+          }
+        },
+        "engine": {
+          "type": "object",
+          "required": ["workingLongSide"],
+          "additionalProperties": false,
+          "properties": {
+            "workingLongSide": { "type": "integer", "minimum": 1 }
+          }
+        }
+      }
+    },
+
+    "run": {
+      "type": "object",
+      "required": ["id", "startedAt", "mode", "completed", "durationMs", "suites"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "minLength": 8, "description": "Random per run. Carries no identity and is not a device fingerprint." },
+        "startedAt": {
+          "type": "string",
+          "description": "ISO wall-clock start. The lower bound is deliberate: a recorder that mistakenly formats performance.now() through new Date() yields 1970-01-01, which looks like data and is not. Rejecting it turns that bug into a validation failure instead of a wrong provenance record.",
+          "pattern": "^20[2-9][0-9]-[01][0-9]-[0-3][0-9]T"
+        },
+        "mode": { "type": "string", "enum": ["quick", "full", "stress"] },
+        "completed": { "type": "boolean", "description": "False for a partial run. Partial reports are accepted and labelled, never silently merged with complete ones." },
+        "abortedReason": { "type": ["string", "null"] },
+        "durationMs": { "type": "number", "minimum": 0 },
+        "suites": { "type": "array", "items": { "type": "string" } },
+        "hostLabel": { "type": ["string", "null"], "description": "Optional self-chosen nickname for the machine, e.g. 'workstation'. Never a hostname or username." }
+      }
+    },
+
+    "environment": {
+      "type": "object",
+      "required": ["browser", "os"],
+      "additionalProperties": false,
+      "properties": {
+        "browser": {
+          "type": "object",
+          "required": ["name", "version"],
+          "additionalProperties": false,
+          "properties": {
+            "name": { "type": "string" },
+            "version": { "type": ["string", "null"] }
+          }
+        },
+        "os": {
+          "type": "object",
+          "required": ["name", "version"],
+          "additionalProperties": false,
+          "properties": {
+            "name": { "type": "string" },
+            "version": { "type": ["string", "null"] }
+          }
+        },
+        "arch": { "type": ["string", "null"] },
+        "deviceMemoryGbBucket": {
+          "type": ["string", "null"],
+          "enum": ["unknown", "<=2", "<=4", "<=8", ">8", null],
+          "description": "navigator.deviceMemory is bucketed, never exact: an exact RAM figure is more identifying than it is useful."
+        },
+        "hardwareConcurrency": { "type": ["integer", "null"], "minimum": 1 },
+        "hardwareConcurrencyBucket": { "type": ["string", "null"], "enum": ["unknown", "<=2", "<=4", "<=8", "<=16", ">16", null] },
+        "devicePixelRatio": { "type": ["number", "null"] },
+        "viewport": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "width": { "type": "integer" }, "height": { "type": "integer" } }
+        },
+        "crossOriginIsolated": { "type": ["boolean", "null"] },
+        "isSecureContext": { "type": ["boolean", "null"] }
+      }
+    },
+
+    "hardware": {
+      "type": ["object", "null"],
+      "description": "Optional, opt-in detail. Present only when the contributor ticked the hardware box, and stripped entirely otherwise.",
+      "additionalProperties": false,
+      "properties": {
+        "gpu": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "properties": {
+            "available": { "type": "boolean" },
+            "software": { "type": "boolean" },
+            "adapter": { "type": ["string", "null"] },
+            "maxTextureDimension2D": { "type": ["integer", "null"] },
+            "maxBufferSize": { "type": ["integer", "null"] }
+          }
+        },
+        "jsHeapLimitBytes": { "type": ["integer", "null"] },
+        "deviceMemoryGb": { "type": ["number", "null"] }
+      }
+    },
+
+    "capabilities": {
+      "type": "object",
+      "description": "Feature detection, one boolean per key. `unknown` is a legal value and means the probe did not run in this mode.",
+      "additionalProperties": { "type": ["boolean", "integer", "number", "string", "null"] }
+    },
+
+    "cases": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "suite", "case", "measurements"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "suite": { "type": "string", "minLength": 1 },
+          "case": { "type": "string", "minLength": 1 },
+          "labels": {
+            "type": "object",
+            "description": "Grouping keys only (backend, cache, format, size). No user data, no paths.",
+            "additionalProperties": { "type": ["string", "number", "boolean", "null"] }
+          },
+          "skipped": { "type": "boolean" },
+          "skipReason": { "type": ["string", "null"] },
+          "failed": { "type": "boolean" },
+          "failReason": { "type": ["string", "null"] },
+          "measurements": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["name", "unit"],
+              "additionalProperties": false,
+              "properties": {
+                "name": { "type": "string", "minLength": 1 },
+                "unit": { "type": "string", "enum": ["ms", "B", "px", "count", "ratio", "score", "frames", "fps", "MPix/s", "MB/s"] },
+                "warmups": { "type": "integer", "minimum": 0 },
+                "samples": { "type": ["array", "null"], "items": { "type": "number" } },
+                "value": { "type": ["number", "null"] },
+                "stats": {
+                  "type": ["object", "null"],
+                  "description": "DERIVED from `samples` by benchmarks/lib/stats.mjs. The validator recomputes and rejects a mismatch.",
+                  "additionalProperties": false,
+                  "properties": {
+                    "n": { "type": "integer", "minimum": 1 },
+                    "min": { "type": "number" },
+                    "median": { "type": "number" },
+                    "p95": { "type": ["number", "null"] },
+                    "max": { "type": "number" },
+                    "iqr": { "type": "number" },
+                    "mean": { "type": "number" },
+                    "stdev": { "type": "number" }
+                  }
+                },
+                "method": {
+                  "type": ["string", "null"],
+                  "description": "How the number was obtained, when the unit alone is ambiguous: e.g. download bytes 'transformers-progress-total', memory 'js-heap-delta-nonisolated'."
+                }
+              }
+            }
+          },
+          "derived": {
+            "type": "object",
+            "description": "Correctness/quality scalars (IoU, dimensions, pass/fail). Not timings.",
+            "additionalProperties": { "type": ["number", "boolean", "string", "null"] }
+          },
+          "notes": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+
+    "notes": { "type": "array", "items": { "type": "string" } },
+
+    "privacy": {
+      "type": "object",
+      "required": ["includeHardwareDetails", "forbiddenFieldsChecked"],
+      "additionalProperties": false,
+      "properties": {
+        "includeHardwareDetails": { "type": "boolean" },
+        "forbiddenFieldsChecked": { "type": "boolean" },
+        "toolkit": { "type": "string" }
+      }
+    }
+  }
+}

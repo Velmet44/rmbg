@@ -1,3 +1,49 @@
+## Benchmark system (2026-10-03) — the gate is still open
+
+A benchmark system now ships: `benchmarks/lib/` (schema, validator, aggregator,
+shared statistics) plus `packages/app/src/bench/` (the suites), run from
+`packages/app/bench.html` in any browser, or headless via
+`npm run bench:browser`. Full method in [benchmarks/README.md](README.md).
+
+**Verified working** — Quick mode, real Chromium, 82 cases, report produced and
+schema-validated. The 35 unit tests cover the statistics, the scoring maths, the
+synthetic corpus and the validator's refusals.
+
+What it adds to the record above:
+
+- **Reproducible measurements on a fresh clone.** The rig above needed a
+  hand-supplied fixture and had produced zero passing runs; the new suites
+  generate their inputs in the browser and cover the shipped app, not just the
+  Transformers.js pipeline.
+- **Contributor cohorts.** Reports are plain JSON, no image data, no file names,
+  no URLs — enforced by a validator that scans every string, shared by the
+  browser and CI. Nobody's number gets in without passing it.
+- **A memory matrix** (1.9 / 12 / 24 / 50 MP) that records where each machine
+  actually stops, including a deliberate allocation-failure probe. §7's matrix
+  finally has somewhere to put its numbers.
+- **Failure injection** for the paths a browser can force: undecodable input,
+  size mismatch, truncated RGB buffer, the 50% region-grow cap, 0×0 encode, the
+  undo-after-mask-swap contract, the history byte budget.
+
+**What it does NOT do — the gate is still open.**
+
+- **No photographic torture set.** The synthetic corpus has ground truth that is
+  exact by construction, which proves the mask pipeline is geometrically correct
+  and says nothing about photographic cutout quality. Hair, fur, fingers and
+  glasses transparency remain uncovered, and every report says so in its own
+  `quality.coverage` case. The scoring code now exists and is tested; there is
+  nothing honest for it to score against. See
+  [corpus/README.md](corpus/README.md).
+- **No accepted cohort yet.** The tables are generated and empty. A device-class
+  latency table needs reports from real machines.
+- **No performance thresholds are enforced in CI**, deliberately: shared
+  runners are not a controlled machine, and a timing gate there would be a flaky
+  gate that teaches people to ignore it.
+- The Stage 0 harness above is retained as historical evidence. It is not what
+  the benchmark system replaced it with.
+
+---
+
 # Stage 0 exit record
 
 Date: 2026-09-29. Machine: CPU-only, 8 GB RAM, ~90 Mbps line but ~6–60 Mbps

@@ -451,32 +451,64 @@ function installPointerEvent(env: Env): void {
 }
 
 /**
- * Track window.setInterval so a leaked timer (the elapsed clock, the scan
- * overlay, the download-stall reporter) cannot outlive its test, and so a test
- * can assert that the app cleared them.
+ * Track window timers so callbacks (including the feedback prompt) cannot outlive
+ * their test environment, and so a test can assert that the app cleared them.
  */
 function installTimers(env: Env, stats: AppStats): { clearAll: () => void } {
   const w = g.window as unknown as AnyObj;
   const realSet = w.setInterval.bind(w) as (fn: (...a: any[]) => void, ms?: number) => number;
   const realClear = w.clearInterval.bind(w) as (id: number) => void;
+  const realSetTimeout = w.setTimeout.bind(w) as (fn: (...a: any[]) => void, ms?: number) => number;
+  const realClearTimeout = w.clearTimeout.bind(w) as (id: number) => void;
   const live = new Set<number>();
+  const liveTimeouts = new Set<number>();
+  const updateLive = () => { stats.timers.live = live.size + liveTimeouts.size; };
   const setIntervalTracked = (fn: (...a: any[]) => void, ms?: number): number => {
     const id = realSet(fn, ms);
     live.add(id);
     stats.timers.created++;
-    stats.timers.live = live.size;
+    updateLive();
     return id;
   };
   const clearIntervalTracked = (id: number): void => {
     live.delete(id);
-    stats.timers.live = live.size;
+    updateLive();
     realClear(id);
+  };
+  const setTimeoutTracked = (fn: (...a: any[]) => void, ms?: number): number => {
+    let id = 0;
+    id = realSetTimeout((...args: any[]) => {
+      liveTimeouts.delete(id);
+      updateLive();
+      fn(...args);
+    }, ms);
+    liveTimeouts.add(id);
+    stats.timers.created++;
+    updateLive();
+    return id;
+  };
+  const clearTimeoutTracked = (id: number): void => {
+    liveTimeouts.delete(id);
+    updateLive();
+    realClearTimeout(id);
   };
   env.define(g, 'setInterval', setIntervalTracked);
   env.define(w, 'setInterval', setIntervalTracked);
   env.define(g, 'clearInterval', clearIntervalTracked);
   env.define(w, 'clearInterval', clearIntervalTracked);
-  return { clearAll: () => { for (const id of live) realClear(id); live.clear(); stats.timers.live = 0; } };
+  env.define(g, 'setTimeout', setTimeoutTracked);
+  env.define(w, 'setTimeout', setTimeoutTracked);
+  env.define(g, 'clearTimeout', clearTimeoutTracked);
+  env.define(w, 'clearTimeout', clearTimeoutTracked);
+  return {
+    clearAll: () => {
+      for (const id of live) realClear(id);
+      for (const id of liveTimeouts) realClearTimeout(id);
+      live.clear();
+      liveTimeouts.clear();
+      updateLive();
+    },
+  };
 }
 
 /** Stub the Cache API: main.ts's isModelCached() probes it on every real run. */

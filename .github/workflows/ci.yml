@@ -47,6 +47,15 @@ jobs:
       - name: Test app
         run: npm run test --workspace @rmbg/app
 
+      # Every committed benchmark report must still satisfy the schema, still
+      # have a stats block that matches its own raw samples, and still contain
+      # no URL, path, email or base64 payload. This is what makes "reports carry
+      # no image data" a checked property instead of a promise, and it is fast:
+      # it is pure arithmetic over small JSON files. Nothing here asserts a
+      # PERFORMANCE threshold — a shared runner is not a controlled machine.
+      - name: Validate accepted benchmark reports
+        run: npm run bench:validate
+
       # The app build runs `tsc --noEmit` before `vite build`, so this also
       # re-gates the app typecheck against a real build rather than a bare tsc.
       - name: Build app

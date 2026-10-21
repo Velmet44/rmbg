@@ -9,8 +9,6 @@ import {
   OpLog,
   RUNTIME_CACHE_NAME,
   boxDownsampleRGB,
-  composite,
-  compositeOverlay,
   dbg,
   dbgTable,
   dbgThrottled,
@@ -21,7 +19,6 @@ import {
   now,
   refineEdges,
   transformSubject,
-  type CompositeResult,
   upsampleAlphaBilinear,
   workingSize,
   type AlphaMask,
@@ -34,6 +31,18 @@ import {
   type SubjectTransform,
 } from '@rmbg/engine';
 import { MODEL_ID, MODEL_REV, MODEL_WEIGHTS_RE } from './model-config';
+// Production paths the benchmark runner also executes, so the numbers describe
+// the shipped code rather than a copy that can drift. See benchmarks/README.md.
+import { decodeToImageRef } from './decode';
+import {
+  avifSupported,
+  compositeExportCanvas,
+  compositeInto,
+  maskGrayInto,
+  originalInto,
+  overlayInto,
+} from './canvas-out';
+import { zipStore } from './zip';
 
 // Mute the log without a rebuild: window.__rmbgDebug = false, or
 // localStorage.setItem('rmbg-debug', 'off').
@@ -45,6 +54,7 @@ dbg('boot', `main.ts evaluated · model=${MODEL_ID} rev=${MODEL_REV.slice(0, 8)}
 const W = window as unknown as Record<string, any>;
 const $ = (s: string) => document.querySelector(s) as HTMLElement;
 const $$ = (s: string) => Array.from(document.querySelectorAll(s)) as HTMLElement[];
+
 type GoatCounterEvent =
   | 'model-ready' | 'model-init-failure'
   | 'inference-success' | 'inference-failure'
@@ -84,7 +94,6 @@ if (typeof (W.goatcounter as GoatCounterClient | undefined)?.count === 'function
 } else {
   goatCounterScript?.addEventListener('load', flushGoatCounterEvents, { once: true });
 }
-
 
 const FX_OFF: Effects = {
   shadow: { on: false, opacity: 0.4, blur: 18, dx: 0, dy: 12 },
@@ -601,23 +610,6 @@ async function ensureReady(): Promise<void> {
   }
 }
 
-async function decodeToImageRef(f: File, id: string): Promise<ImageRef> {
-  const t0 = now();
-  const bmp = await createImageBitmap(f);
-  const canvas = document.createElement('canvas');
-  canvas.width = bmp.width; canvas.height = bmp.height;
-  const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
-  ctx.drawImage(bmp, 0, 0);
-  const data = ctx.getImageData(0, 0, bmp.width, bmp.height).data;
-  const rgb = new Uint8ClampedArray(bmp.width * bmp.height * 3);
-  for (let i = 0; i < bmp.width * bmp.height; i++) {
-    rgb[i * 3] = data[i * 4]; rgb[i * 3 + 1] = data[i * 4 + 1]; rgb[i * 3 + 2] = data[i * 4 + 2];
-  }
-  bmp.close();
-  dbg('ingest', `decode "${id}" → ${canvas.width}×${canvas.height} in ${(now() - t0).toFixed(0)}ms`);
-  return { id, width: canvas.width, height: canvas.height, rgb };
-}
-
 // ---------- result display ----------
 
 let resultCanvas: HTMLCanvasElement | null = null;
@@ -711,49 +703,6 @@ function ensureSplit(img: ImageRef) {
   void img;
 }
 
-/** Blit an engine CompositeResult into a canvas, via the shared `blit`
- *  scratch canvas so each redraw does not allocate a full-res buffer. */
-function blitResult(target: HTMLCanvasElement, out: CompositeResult, maxSide = 0) {
-  blit.width = out.width; blit.height = out.height;
-  blit.getContext('2d')!.putImageData(
-    new ImageData(out.rgba as unknown as Uint8ClampedArray<ArrayBuffer>, out.width, out.height), 0, 0,
-  );
-  let dw = out.width, dh = out.height;
-  if (maxSide > 0) {
-    const s = Math.min(1, maxSide / Math.max(dw, dh));
-    dw = Math.max(1, Math.round(dw * s)); dh = Math.max(1, Math.round(dh * s));
-  }
-  target.width = dw; target.height = dh;
-  const ctx = target.getContext('2d')!;
-  ctx.clearRect(0, 0, dw, dh);
-  ctx.drawImage(blit, 0, 0, dw, dh);
-}
-
-function drawComposite(target: HTMLCanvasElement, view: { image: ImageRef; mask: AlphaMask }, bg: Background, fx: Effects, maxSide = 0) {
-  blitResult(target, composite(view.image, view.mask, bg, fx), maxSide);
-}
-
-const blit = document.createElement('canvas');
-
-/** Overlay view: original pixels with the mask veiled on top, so a region the
- *  AI wrongly kept is obvious. Uses the CANONICAL mask, not the derived view —
- *  the point is to audit the cutout itself, not the finishing effects. */
-function drawOverlay(target: HTMLCanvasElement, img: ImageRef, mask: AlphaMask) {
-  blitResult(target, compositeOverlay(img, mask));
-}
-
-function drawMaskGray(target: HTMLCanvasElement, mask: AlphaMask) {
-  const ctx = target.getContext('2d')!;
-  target.width = mask.width; target.height = mask.height;
-  const id = ctx.createImageData(mask.width, mask.height);
-  for (let i = 0; i < mask.width * mask.height; i++) {
-    const v = Math.round(Math.min(1, Math.max(0, mask.alpha[i])) * 255);
-    id.data[i * 4] = id.data[i * 4 + 1] = id.data[i * 4 + 2] = v;
-    id.data[i * 4 + 3] = 255;
-  }
-  ctx.putImageData(id, 0, 0);
-}
-
 /** Redraw the canvas stack. Coalesced onto one animation frame: every mode
  *  switch re-derives a FULL-RESOLUTION composite (a Float32 clone plus a
  *  full-res putImageData), and the finishing sliders fire `input` per pointer
@@ -800,9 +749,9 @@ function renderDisplay() {
     const lc = $('#splitLC') as HTMLCanvasElement | null;
     const rc = $('#splitRC') as HTMLCanvasElement | null;
     if (lc && rc) {
-      drawOriginal(lc, state.image);
+      originalInto(lc, state.image);
       const view = derivedView();
-      drawComposite(rc, view, state.bg, state.fx);
+      compositeInto(rc, view, state.bg, state.fx);
     }
     return;
   }
@@ -812,31 +761,17 @@ function renderDisplay() {
   } else if (lastCompare === 'mask') {
     up.style.display = 'none';
     resultCanvas.style.display = 'block';
-    drawMaskGray(resultCanvas, mask);
+    maskGrayInto(resultCanvas, mask);
   } else if (lastCompare === 'overlay') {
     up.style.display = 'none';
     resultCanvas.style.display = 'block';
-    drawOverlay(resultCanvas, state.image, mask);
+    overlayInto(resultCanvas, state.image, mask);
   } else {
     up.style.display = 'none';
     resultCanvas.style.display = 'block';
     const view = derivedView();
-    drawComposite(resultCanvas, view, state.bg, state.fx);
+    compositeInto(resultCanvas, view, state.bg, state.fx);
   }
-}
-
-/** Draw the original photo into a full-res canvas (split-view left half). */
-function drawOriginal(target: HTMLCanvasElement, img: ImageRef) {
-  target.width = img.width; target.height = img.height;
-  const ctx = target.getContext('2d')!;
-  const id = ctx.createImageData(img.width, img.height);
-  for (let i = 0; i < img.width * img.height; i++) {
-    id.data[i * 4] = img.rgb[i * 3];
-    id.data[i * 4 + 1] = img.rgb[i * 3 + 1];
-    id.data[i * 4 + 2] = img.rgb[i * 3 + 2];
-    id.data[i * 4 + 3] = 255;
-  }
-  ctx.putImageData(id, 0, 0);
 }
 
 // ---------- real flows (override mockup globals) ----------
@@ -1194,7 +1129,7 @@ function runReveal() {
   }
   const cv = $('#revealC') as HTMLCanvasElement;
   const line = $('#revealLine') as HTMLElement;
-  drawOriginal(cv, state.image);
+  originalInto(cv, state.image);
   const my = ++revealToken;
   ov.style.display = 'block';
   const finish = () => { if (my === revealToken) ov!.style.display = 'none'; };
@@ -1597,33 +1532,6 @@ function resetExportRes() {
 }
 
 /** AVIF encode support varies by browser/runtime — detect, never assume. */
-let avifCache: boolean | null = null;
-async function avifSupported(): Promise<boolean> {
-  if (avifCache !== null) return avifCache;
-  try {
-    const c = document.createElement('canvas');
-    c.width = c.height = 8;
-    avifCache = c.toDataURL('image/avif').startsWith('data:image/avif');
-  } catch {
-    avifCache = false;
-  }
-  return avifCache;
-}
-
-/** Full-res composite, then a single high-quality resample to export size. */
-function exportCanvas(view: { image: ImageRef; mask: AlphaMask }, bg: Background, fx: Effects, w: number, h: number): HTMLCanvasElement {
-  const full = document.createElement('canvas');
-  drawComposite(full, view, bg, fx);
-  if (full.width === w && full.height === h) return full;
-  const out = document.createElement('canvas');
-  out.width = w; out.height = h;
-  const ctx = out.getContext('2d')!;
-  ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = 'high';
-  ctx.drawImage(full, 0, 0, w, h);
-  return out;
-}
-
 async function realExport() {
   if (!state.image) { W.toast('Nothing to export yet', true); return; }
   let fmt = selectedFormat();
@@ -1661,7 +1569,7 @@ async function realExport() {
       note += pct === 100 ? ' · custom size' : pct < 100 ? ` · downscaled to ${pct}%` : ` · upscaled to ${pct}%`;
     }
     const t0 = now();
-    const canvas = exportCanvas(view, bg, fxUsed, size.w, size.h);
+    const canvas = compositeExportCanvas(view, bg, fxUsed, size.w, size.h);
     dbg('export', `composited ${size.w}×${size.h} in ${(now() - t0).toFixed(0)}ms · cutout=${cutout} bg=${bg.kind}`);
     ($('#expBar') as HTMLElement).style.width = '60%';
     const mime = fmt === 'PNG' ? 'image/png'
@@ -2554,7 +2462,7 @@ async function downloadItemPNG(it: BatchItem): Promise<void> {
   if (!it.mask) return;
   const t0 = now();
   const tmp = document.createElement('canvas');
-  drawComposite(tmp, { image: it.image, mask: it.mask }, { kind: 'transparent' }, FX_OFF);
+  compositeInto(tmp, { image: it.image, mask: it.mask }, { kind: 'transparent' }, FX_OFF);
   const blob: Blob | null = await new Promise((res) => tmp.toBlob(res, 'image/png'));
   if (!blob) { trackGoatCounterEvent('export-failure'); W.toast(`Export failed for ${it.name}`, true); return; }
   const a = document.createElement('a');
@@ -2567,75 +2475,6 @@ async function downloadItemPNG(it: BatchItem): Promise<void> {
   W.toast(`Exported ${a.download}`);
 }
 
-// Minimal stored (uncompressed) ZIP writer: one single-file download instead
-// of N blocked popups, zero dependencies.
-const CRC_T = (() => {
-  const t = new Uint32Array(256);
-  for (let n = 0; n < 256; n++) {
-    let c = n;
-    for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1;
-    t[n] = c;
-  }
-  return t;
-})();
-function crc32(d: Uint8Array): number {
-  let c = 0xFFFFFFFF;
-  for (let i = 0; i < d.length; i++) c = CRC_T[(c ^ d[i]) & 0xFF] ^ (c >>> 8);
-  return (c ^ 0xFFFFFFFF) >>> 0;
-}
-function zipStore(files: { name: string; data: Uint8Array }[]): Uint8Array {
-  const enc = new TextEncoder();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  const push = (p: Uint8Array) => { chunks.push(p); total += p.length; };
-  const h16 = (v: number) => new Uint8Array([v & 0xFF, (v >>> 8) & 0xFF]);
-  const h32 = (v: number) => new Uint8Array([v & 0xFF, (v >>> 8) & 0xFF, (v >>> 16) & 0xFF, (v >>> 24) & 0xFF]);
-  const now = new Date();
-  const dosTime = (now.getHours() << 11) | (now.getMinutes() << 5) | ((now.getSeconds() / 2) | 0);
-  const dosDate = ((now.getFullYear() - 1980) << 9) | ((now.getMonth() + 1) << 5) | now.getDate();
-  const central: Uint8Array[] = [];
-  let cenTotal = 0;
-  const cpush = (p: Uint8Array) => { central.push(p); cenTotal += p.length; };
-  let off = 0;
-  for (const f of files) {
-    const nb = enc.encode(f.name);
-    const crc = crc32(f.data);
-    const head = new Uint8Array(30 + nb.length);
-    const dv = new DataView(head.buffer);
-    dv.setUint32(0, 0x04034B50, true);
-    dv.setUint16(4, 20, true);
-    dv.setUint16(6, 0x0800, true);
-    dv.setUint16(8, 0, true);
-    dv.setUint16(10, dosTime, true);
-    dv.setUint16(12, dosDate, true);
-    dv.setUint32(14, crc, true);
-    dv.setUint32(18, f.data.length, true);
-    dv.setUint32(22, f.data.length, true);
-    dv.setUint16(26, nb.length, true);
-    dv.setUint16(28, 0, true);
-    head.set(nb, 30);
-    push(head);
-    push(f.data);
-    cpush(new Uint8Array([
-      ...h32(0x02014B50), ...h16(20), ...h16(20), ...h16(0x0800), ...h16(0),
-      ...h16(dosTime), ...h16(dosDate), ...h32(crc), ...h32(f.data.length), ...h32(f.data.length),
-      ...h16(nb.length), ...h16(0), ...h16(0), ...h16(0), ...h16(0), ...h32(0), ...h32(off),
-    ]));
-    cpush(nb);
-    off += head.length + f.data.length;
-  }
-  const cenOff = off;
-  for (const c of central) push(c);
-  push(new Uint8Array([
-    ...h32(0x06054B50), ...h16(0), ...h16(0), ...h16(files.length), ...h16(files.length),
-    ...h32(cenTotal), ...h32(cenOff), ...h16(0),
-  ]));
-  const out = new Uint8Array(total);
-  let o = 0;
-  for (const c of chunks) { out.set(c, o); o += c.length; }
-  return out;
-}
-
 async function exportAllZIP(): Promise<void> {
   const doneItems = batch.filter((b) => b.status === 'done' && b.mask);
   if (doneItems.length === 0) { W.toast('Nothing finished yet', true); return; }
@@ -2644,7 +2483,7 @@ async function exportAllZIP(): Promise<void> {
   for (const it of doneItems) {
     $('#batchCount').textContent = `Exporting ${i} / ${doneItems.length}…`;
     const tmp = document.createElement('canvas');
-    drawComposite(tmp, { image: it.image, mask: it.mask! }, { kind: 'transparent' }, FX_OFF);
+    compositeInto(tmp, { image: it.image, mask: it.mask! }, { kind: 'transparent' }, FX_OFF);
     const blob: Blob | null = await new Promise((res) => tmp.toBlob(res, 'image/png'));
     if (!blob) { trackGoatCounterEvent('export-failure'); W.toast(`Export failed for ${it.name}`, true); continue; }
     files.push({ name: `${stem(it.name)}-cutout.png`, data: new Uint8Array(await blob.arrayBuffer()) });
@@ -2684,7 +2523,7 @@ const batchPicker = (() => {
 // NOTE: the live GitHub star counter was removed because it made an
 // undisclosed api.github.com request on page load. GoatCounter is now used for
 // disclosed aggregate page/use events; only fixed event names are sent, never
-// image data. The footer keeps a plain link to the repository instead.
+// image data. The footer keeps a plain link to the repository.
 
 // ---------- destructive-action confirm ----------
 // One small modal for actions that destroy work the user cannot get back.

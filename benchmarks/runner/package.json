@@ -1,0 +1,18 @@
+{
+  "name": "@rmbg/runner",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Benchmark tooling: validate submitted reports, aggregate accepted ones, regenerate the README snapshot, and drive the browser runner.",
+  "bin": { "rmbg-bench": "./bin/rmbg-bench.mjs" },
+  "scripts": {
+    "validate": "node ./bin/rmbg-bench.mjs validate",
+    "summary": "node ./bin/rmbg-bench.mjs summary",
+    "corpus": "node ./bin/rmbg-bench.mjs corpus",
+    "browser": "node ./bin/rmbg-bench.mjs browser",
+    "serve": "node ./bin/rmbg-bench.mjs serve"
+  },
+  "devDependencies": {
+    "@playwright/cli": "0.1.22"
+  }
+}

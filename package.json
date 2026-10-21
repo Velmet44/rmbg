@@ -9,7 +9,14 @@
   ],
   "scripts": {
     "test": "npm run test --workspaces --if-present",
-    "build": "npm run build --workspaces --if-present"
+    "build": "npm run build --workspaces --if-present",
+    "bench": "npm run build --workspace @rmbg/app && node benchmarks/runner/bin/rmbg-bench.mjs serve",
+    "bench:serve": "node benchmarks/runner/bin/rmbg-bench.mjs serve",
+    "bench:validate": "node benchmarks/runner/bin/rmbg-bench.mjs validate",
+    "bench:accept": "node benchmarks/runner/bin/rmbg-bench.mjs accept",
+    "bench:summary": "node benchmarks/runner/bin/rmbg-bench.mjs summary",
+    "bench:corpus": "node benchmarks/runner/bin/rmbg-bench.mjs corpus",
+    "bench:browser": "node benchmarks/runner/bin/rmbg-bench.mjs browser"
   },
   "dependencies": {
     "@huggingface/transformers": "^4.3.0"

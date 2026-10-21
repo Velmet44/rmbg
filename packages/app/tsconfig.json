@@ -9,7 +9,13 @@
     "noUnusedParameters": false,
     "noFallthroughCasesInSwitch": true,
     "skipLibCheck": true,
-    "types": ["vite/client"]
+    "types": ["vite/client"],
+    // The benchmark runner deliberately shares code with the Node CLI under
+    // benchmarks/lib: one statistics module and one validator, so a number in
+    // the README is produced by the same code that measured it and a
+    // contributor's self-check is the same check CI runs.
+    "allowJs": true,
+    "resolveJsonModule": true
   },
   "include": ["src", "vite.config.ts"]
 }

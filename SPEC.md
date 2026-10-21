@@ -309,6 +309,8 @@ Gate rule: **no editor work beyond Stage 1 until the Stage 0 benchmark passes.**
 
 **What this gate actually delivered (honest accounting).** The rig exists (`benchmarks/harness/`), but the gate did not pass in the sense this section intends, and the record says so. Editor work shipped past Stage 1 anyway.
 
+**A benchmark system now exists, and it does not close this gate.** `benchmarks/lib/` + `packages/app/src/bench/` measure the shipped app — engine, ingest, display, export, batch, memory, failure injection, and (Full mode) model init, segmentation and mask scoring — and run in any browser with no install, so contributors can submit reports from their own machines. See [benchmarks/README.md](benchmarks/README.md). It produces three things this section asks for and could not: reproducible measurements, contributor-submitted cohorts, and a memory matrix at 12/24/50 MP. It does **not** produce the torture set. The synthetic corpus has ground truth that is exact by construction, which proves the mask pipeline is geometrically correct and says nothing about photographic cutout quality; hair, fur, fingers and glasses transparency remain uncovered, and every report states that in its own `quality.coverage` case. The gate is still open.
+
 - The harness writes per-phase timings and one mask PNG per run. It computes **no IoU, no boundary F-measure, and no rating sheet** — there is no ground truth in the repo and no scoring code. Every quality claim in this project currently rests on a human looking at a mask.
 - The torture set is **one fixture** (`rmbg14-example.jpg`), not the nine cases listed above. No hair, no fur, no glasses, no white-on-white, no small object.
 - Fixture and result bytes are gitignored, so a fresh clone reproduces nothing; a contributor must supply an image by hand or `npm run measure` exits immediately.
@@ -370,7 +372,7 @@ Per-stage status as of 2026-10-02. `DONE` means built and, where a claim needed 
 | 1 — Engine core | **DONE** | `ImageRef`, float-alpha mask store, `OpLog`, `SegmentationAdapter`, `removeBackground` + full-res upsample, `composite`, app-layer export at original resolution. Engine suite and typecheck run in CI. Verified end-to-end on the giraffe fixture (drop → remove → inspect → PNG at original resolution). |
 | 2 — Loading strategy | **DONE** (absorbed into 0–1) | Web Worker inference, page-load prefetch, phased honest progress, cache persistence, return visit skips the download, mobile shell. Multithreaded WASM remains Stage 4. |
 | 3 — Correction | **DONE 2026-09-30** | Brushes, mask/overlay views, guided select (deterministic fallback), region recompute, shadow/feather/defringe, background + subject transform, single operation-based history. Evidence tables in `benchmarks/GATE.md`. |
-| 4 — Batch and hardening | **PARTIAL** | Batch queue, per-item retry, guarded open-in-editor and ZIP export shipped; capability-gated AVIF and custom export resolution shipped. **Not done:** error-injection tests, the 12/24/50 MP memory matrix, the device-class latency table, multithreaded WASM, a manifest validator, a real privacy audit and a full network-off run. |
+| 4 — Batch and hardening | **PARTIAL** | Batch queue, per-item retry, guarded open-in-editor and ZIP export shipped; capability-gated AVIF and custom export resolution shipped. Error-injection tests and the 12/24/50 MP memory matrix now ship as the `reliability` and `memory` benchmark suites (`benchmarks/README.md`), which run in any browser and accept contributor reports; the first recorded cohort is still empty. **Not done:** the device-class latency table, multithreaded WASM, a manifest validator, a real privacy audit and a full network-off run. |
 
 An earlier draft of this section carried a second, mislabelled "Stage 3" heading and a status note claiming Stage 4 was untouched. Both are gone; the table above is the only stage record in this document.
 
@@ -404,8 +406,8 @@ Worker, prefetch, phased progress, cache proof and the mobile shell all landed d
 
 - ✅ Sequential batch queue, per-item states, retry, guarded open-in-editor, batch export + archive. Admitted by a total-pixel budget rather than a file count.
 - ✅ Custom export resolution (explicit width × height) and capability-gated AVIF.
-- ⬜ Full error catalog (§11) wired to real failure injection tests.
-- ⬜ Memory/large-image matrix (12/24/50 MP) and a device-class latency table published from the harness. Both need measurements that do not exist (§7).
+- ✅ Failure-injection cases for the paths a browser can force (undecodable input, size mismatch, truncated buffer, history contracts) — shipped as the `reliability` benchmark suite, not as a unit test, because several of them need a real canvas. Still missing: the download/OOM half of the catalog (§11), which needs a network or memory fault injected at the fetch.
+- 🟡 Memory/large-image matrix (12/24/50 MP) ships as the `memory` benchmark suite and records where each machine stops, but **no accepted cohort exists yet**. The device-class latency table still needs measurements that do not exist (§7).
 - ⬜ Multithreaded WASM fallback — requires COOP/COEP headers, which the current static hosting cannot serve, so the CPU fallback is single-threaded.
 - ⬜ A `validate:manifest` script wired into CI (schema, MIT rule, checksum).
 - ⬜ Privacy audit: a real network-off run of the shipped flow.

@@ -33,3 +33,6 @@ benchmarks/harness/fixtures/*.png
 # Harness outputs: measurements, masks, logs stay local (READMEs tracked)
 benchmarks/harness/results/*
 !benchmarks/harness/results/README.md
+# Ad-hoc benchmark runs stay local. A report reaches git deliberately, through
+# `npm run bench:accept`, which validates it first.
+benchmarks/results/*.json
