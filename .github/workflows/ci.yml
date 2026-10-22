@@ -47,6 +47,13 @@ jobs:
       - name: Test app
         run: npm run test --workspace @rmbg/app
 
+      # Offline provenance check: the manifest matches its schema, the shipped
+      # default is MIT, and its ID/revision match packages/app/src/model-config.ts.
+      - name: Validate model manifest
+        run: |
+          npm run test:manifest
+          npm run validate:manifest
+
       # Every committed benchmark report must still satisfy the schema, still
       # have a stats block that matches its own raw samples, and still contain
       # no URL, path, email or base64 payload. This is what makes "reports carry
